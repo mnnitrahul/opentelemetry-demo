@@ -66,15 +66,21 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
-      - name: Create EKS cluster
+      - name: Create EKS cluster (skip if exists)
         run: |
-          eksctl create cluster \
-            --name "${{ inputs.cluster_name }}" \
-            --region "${{ inputs.region }}" \
-            --nodes "${{ inputs.node_count }}" \
-            --node-type "${{ inputs.node_type }}" \
-            --with-oidc \
-            --managed
+          if aws eks describe-cluster --name "${{ inputs.cluster_name }}" --region "${{ inputs.region }}" &>/dev/null; then
+            echo "Cluster '${{ inputs.cluster_name }}' already exists. Skipping creation."
+            aws eks update-kubeconfig --name "${{ inputs.cluster_name }}" --region "${{ inputs.region }}"
+          else
+            echo "Cluster not found. Creating..."
+            eksctl create cluster \
+              --name "${{ inputs.cluster_name }}" \
+              --region "${{ inputs.region }}" \
+              --nodes "${{ inputs.node_count }}" \
+              --node-type "${{ inputs.node_type }}" \
+              --with-oidc \
+              --managed
+          fi
 
       - name: Create IAM policy for X-Ray
         id: iam
@@ -119,7 +125,7 @@ jobs:
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
           helm repo update
 
-          helm install otel-demo open-telemetry/opentelemetry-demo \
+          helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
             --namespace "${NAMESPACE}" \
             --create-namespace \
             --set opentelemetry-collector.serviceAccount.create=false \
