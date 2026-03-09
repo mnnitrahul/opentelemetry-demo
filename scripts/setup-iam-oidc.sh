@@ -139,7 +139,10 @@ POLICY_DOC=$(cat <<'EOF'
         "iam:ListInstanceProfilesForRole",
         "iam:CreateOpenIDConnectProvider",
         "iam:DeleteOpenIDConnectProvider",
-        "iam:GetOpenIDConnectProvider"
+        "iam:GetOpenIDConnectProvider",
+        "iam:TagOpenIDConnectProvider",
+        "iam:UntagOpenIDConnectProvider",
+        "iam:ListOpenIDConnectProviders"
       ],
       "Resource": "*"
     },
