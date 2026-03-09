@@ -32,6 +32,7 @@ env:
   XRAY_POLICY_NAME: otel-collector-xray-policy
   XRAY_ROLE_NAME: otel-collector-xray-role
   COLLECTOR_SA_NAME: otel-collector
+  APP_TAG: Application=AppWithMidlina
 
 permissions:
   id-token: write
@@ -79,7 +80,8 @@ jobs:
               --nodes "${{ inputs.node_count }}" \
               --node-type "${{ inputs.node_type }}" \
               --with-oidc \
-              --managed
+              --managed \
+              --tags "${APP_TAG}"
           fi
 
       - name: Create IAM policy for X-Ray
@@ -119,6 +121,18 @@ jobs:
             --role-name "${XRAY_ROLE_NAME}" \
             --approve \
             --override-existing-serviceaccounts
+
+      - name: Adopt IRSA service account for Helm
+        run: |
+          kubectl annotate serviceaccount "${COLLECTOR_SA_NAME}" \
+            -n "${NAMESPACE}" \
+            meta.helm.sh/release-name=otel-demo \
+            meta.helm.sh/release-namespace="${NAMESPACE}" \
+            --overwrite
+          kubectl label serviceaccount "${COLLECTOR_SA_NAME}" \
+            -n "${NAMESPACE}" \
+            app.kubernetes.io/managed-by=Helm \
+            --overwrite
 
       - name: Deploy OpenTelemetry Demo
         run: |
