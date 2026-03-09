@@ -884,6 +884,7 @@ services:
         condition: service_healthy
     logging: *logging
     environment:
+      - AWS_REGION
       - FRONTEND_PROXY_ADDR
       - IMAGE_PROVIDER_HOST
       - IMAGE_PROVIDER_PORT

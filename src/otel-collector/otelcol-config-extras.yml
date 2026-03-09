@@ -1,18 +1,22 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# extra settings to be merged into OpenTelemetry Collector configuration
-# do not delete this file
+# Extra settings merged into OpenTelemetry Collector configuration
+# Adds X-Ray OTLP endpoint for traces alongside existing Jaeger exporter
 
-## Example configuration for sending data to your own OTLP HTTP backend
-## Note: the spanmetrics exporter must be included in the exporters array
-## if overriding the traces pipeline.
-##
-#  exporters:
-#    otlp_http/example:
-#      endpoint: <your-endpoint-url>
-#
-#  service:
-#    pipelines:
-#      traces:
-#        exporters: [spanmetrics, otlp_http/example]
+extensions:
+  sigv4auth:
+    region: us-east-1
+    service: xray
+
+exporters:
+  otlphttp/xray:
+    endpoint: https://xray.us-east-1.amazonaws.com
+    auth:
+      authenticator: sigv4auth
+
+service:
+  extensions: [sigv4auth]
+  pipelines:
+    traces:
+      exporters: [otlp_grpc/jaeger, spanmetrics, otlphttp/xray, debug]
