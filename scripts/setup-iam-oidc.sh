@@ -219,6 +219,14 @@ POLICY_DOC=$(cat <<'EOF'
       "Resource": "*"
     },
     {
+      "Sid": "ElastiCache",
+      "Effect": "Allow",
+      "Action": [
+        "elasticache:*"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "S3ForLambdaAndCFN",
       "Effect": "Allow",
       "Action": [

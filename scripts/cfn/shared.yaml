@@ -423,6 +423,50 @@ Resources:
               - sqs:DeleteMessage
             Resource: !GetAtt NotificationsQueue.Arn
 
+  # --- ElastiCache Serverless (Valkey) ---
+  ValkeySG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ElastiCache Serverless (Valkey)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EcsTaskSG
+          Description: Valkey from ECS tasks
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EksClusterSG
+          Description: Valkey from EKS
+      Tags:
+        - Key: Name
+          Value: otel-demo-valkey-sg
+
+  ValkeySubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: otel-demo-valkey-subnets
+      Description: Subnets for ElastiCache Serverless Valkey
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  ValkeyServerless:
+    Type: AWS::ElastiCache::ServerlessCache
+    Properties:
+      ServerlessCacheName: otel-demo-valkey
+      Engine: valkey
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref ValkeySG
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
 # ---------------------------------------------------------------------------
 # Outputs / Exports
 # ---------------------------------------------------------------------------
@@ -527,3 +571,9 @@ Outputs:
     Value: !Ref PublicSubnet2
     Export:
       Name: OtelDemoPublicSubnet2
+
+  ValkeyEndpoint:
+    Description: ElastiCache Serverless Valkey endpoint
+    Value: !Sub ${ValkeyServerless.Endpoint.Address}:${ValkeyServerless.Endpoint.Port}
+    Export:
+      Name: OtelDemoValkeyEndpoint

@@ -517,6 +517,8 @@ Resources:
             # Lambda services via API Gateway
             - Name: CURRENCY_SERVICE_ADDR
               Value: !Ref ApiGatewayUrl
+            - Name: VALKEY_ADDR
+              Value: !ImportValue OtelDemoValkeyEndpoint
             - Name: AWS_REGION
               Value: !Ref AWS::Region
 
