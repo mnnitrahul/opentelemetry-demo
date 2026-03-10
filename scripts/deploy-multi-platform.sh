@@ -332,7 +332,7 @@ echo "  Resolved values written to ${HELM_VALUES_RESOLVED}"
 # Step 6: Helm upgrade with updated values
 # ---------------------------------------------------------------------------
 echo ""
-echo "[6/6] Running helm upgrade..."
+echo "[6/7] Running helm upgrade..."
 
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
 helm repo update
@@ -344,6 +344,25 @@ helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
   -f "${HELM_VALUES_RESOLVED}" \
   --wait \
   --timeout 10m
+
+# ---------------------------------------------------------------------------
+# Step 7: Scale up ECS services (were created with DesiredCount=0)
+# ---------------------------------------------------------------------------
+echo ""
+echo "[7/7] Scaling up ECS services..."
+
+ECS_CLUSTER_NAME="otel-demo-ecs"
+for svc in otel-demo-checkout otel-demo-cart otel-demo-product-catalog otel-demo-product-reviews; do
+  echo "  Scaling ${svc} to 2 tasks..."
+  aws ecs update-service \
+    --region "${REGION}" \
+    --cluster "${ECS_CLUSTER_NAME}" \
+    --service "${svc}" \
+    --desired-count 2 \
+    --no-cli-pager > /dev/null 2>&1 || echo "  Warning: could not scale ${svc}"
+done
+
+echo "  ECS services scaled up. Tasks will start shortly."
 
 echo ""
 echo "============================================"

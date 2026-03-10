@@ -45,8 +45,8 @@ Parameters:
 
   ServiceDesiredCount:
     Type: Number
-    Default: 2
-    Description: Desired number of tasks per ECS service
+    Default: 0
+    Description: Desired number of tasks per ECS service (set to 0 for initial deploy, scale up after wiring)
 
   EcsOptimizedAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
