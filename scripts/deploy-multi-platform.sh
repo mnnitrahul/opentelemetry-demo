@@ -301,7 +301,7 @@ for svc in "${LAMBDA_SERVICES[@]}"; do
   ECR_IMAGE="${ECR_REGISTRY}/${REPO_NAME}:latest"
 
   # Create ECR repo if not exists
-  aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" 2>/dev/null || \
+  aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" > /dev/null 2>&1 || \
     aws ecr create-repository --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager > /dev/null
 
   # Set ECR repo policy to allow Lambda to pull
@@ -322,11 +322,27 @@ for svc in "${LAMBDA_SERVICES[@]}"; do
     ]
   }' --no-cli-pager > /dev/null 2>&1
 
+  # Check if image already exists in ECR — skip pull/push if so
+  EXISTING=$(aws ecr describe-images --repository-name "${REPO_NAME}" --region "${REGION}" \
+    --image-ids imageTag=latest --query 'imageDetails[0].imagePushedAt' --output text 2>/dev/null || echo "NONE")
+
+  if [[ "${EXISTING}" != "NONE" ]]; then
+    echo "  ${REPO_NAME}:latest already in ECR, skipping."
+    ECR_IMAGES["${svc}"]="${ECR_IMAGE}"
+    continue
+  fi
+
   echo "  Pulling ${GHCR_IMAGE}..."
-  docker pull "${GHCR_IMAGE}" --quiet
+  if ! docker pull "${GHCR_IMAGE}" 2>&1; then
+    echo "  ERROR: Failed to pull ${GHCR_IMAGE}"
+    exit 1
+  fi
   docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
   echo "  Pushing to ${ECR_IMAGE}..."
-  docker push "${ECR_IMAGE}" --quiet
+  if ! docker push "${ECR_IMAGE}" 2>&1; then
+    echo "  ERROR: Failed to push ${ECR_IMAGE}"
+    exit 1
+  fi
 
   ECR_IMAGES["${svc}"]="${ECR_IMAGE}"
 done
