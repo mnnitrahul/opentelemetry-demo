@@ -44,11 +44,6 @@ Parameters:
     Default: 512
     Description: Lambda function memory size in MB
 
-  AdotLayerArn:
-    Type: String
-    Default: arn:aws:lambda:us-east-1:901920570463:layer:aws-otel-collector-amd64-ver-0-98-0:1
-    Description: ARN of the ADOT Lambda layer for OTel instrumentation
-
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
@@ -73,11 +68,8 @@ Resources:
         - x86_64
       TracingConfig:
         Mode: Active
-      Layers:
-        - !Ref AdotLayerArn
       Environment:
         Variables:
-          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
           OTEL_SERVICE_NAME: multi-ad
           OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
       Tags:
@@ -99,11 +91,8 @@ Resources:
         - x86_64
       TracingConfig:
         Mode: Active
-      Layers:
-        - !Ref AdotLayerArn
       Environment:
         Variables:
-          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
           OTEL_SERVICE_NAME: multi-recommendation
           OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
       Tags:
@@ -125,11 +114,8 @@ Resources:
         - x86_64
       TracingConfig:
         Mode: Active
-      Layers:
-        - !Ref AdotLayerArn
       Environment:
         Variables:
-          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
           OTEL_SERVICE_NAME: multi-currency
           OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
       Tags:
@@ -151,11 +137,8 @@ Resources:
         - x86_64
       TracingConfig:
         Mode: Active
-      Layers:
-        - !Ref AdotLayerArn
       Environment:
         Variables:
-          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
           OTEL_SERVICE_NAME: multi-quote
           OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
       Tags:
@@ -177,11 +160,8 @@ Resources:
         - x86_64
       TracingConfig:
         Mode: Active
-      Layers:
-        - !Ref AdotLayerArn
       Environment:
         Variables:
-          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
           OTEL_SERVICE_NAME: multi-email
           OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
       Tags:
