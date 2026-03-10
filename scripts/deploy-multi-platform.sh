@@ -301,32 +301,27 @@ for svc in "${LAMBDA_SERVICES[@]}"; do
   ECR_IMAGE="${ECR_REGISTRY}/${REPO_NAME}:latest"
 
   # Create ECR repo if not exists
-  aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" > /dev/null 2>&1 || \
+  if ! aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" > /dev/null 2>&1; then
+    echo "  Creating ECR repo: ${REPO_NAME}"
     aws ecr create-repository --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager > /dev/null
+  fi
 
   # Set ECR repo policy to allow Lambda to pull
-  aws ecr set-repository-policy --repository-name "${REPO_NAME}" --region "${REGION}" --policy-text '{
+  aws ecr set-repository-policy --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager --policy-text '{
     "Version": "2012-10-17",
     "Statement": [
       {
         "Sid": "LambdaECRImageRetrievalPolicy",
         "Effect": "Allow",
-        "Principal": {
-          "Service": "lambda.amazonaws.com"
-        },
-        "Action": [
-          "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
-        ]
+        "Principal": { "Service": "lambda.amazonaws.com" },
+        "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
       }
     ]
-  }' --no-cli-pager > /dev/null 2>&1
+  }' > /dev/null 2>&1 || true
 
   # Check if image already exists in ECR — skip pull/push if so
-  EXISTING=$(aws ecr describe-images --repository-name "${REPO_NAME}" --region "${REGION}" \
-    --image-ids imageTag=latest --query 'imageDetails[0].imagePushedAt' --output text 2>/dev/null || echo "NONE")
-
-  if [[ "${EXISTING}" != "NONE" ]]; then
+  if aws ecr describe-images --repository-name "${REPO_NAME}" --region "${REGION}" \
+    --image-ids imageTag=latest > /dev/null 2>&1; then
     echo "  ${REPO_NAME}:latest already in ECR, skipping."
     ECR_IMAGES["${svc}"]="${ECR_IMAGE}"
     continue
