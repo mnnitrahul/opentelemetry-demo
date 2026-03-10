@@ -262,7 +262,7 @@ Resources:
       Name: otel-demo-checkout-tg
       Port: 5050
       Protocol: HTTP
-      ProtocolVersion: GRPC
+      ProtocolVersion: HTTP2
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -272,7 +272,7 @@ Resources:
       UnhealthyThresholdCount: 3
       HealthCheckIntervalSeconds: 30
       Matcher:
-        GrpcCode: '0-99'
+        HttpCode: '200'
       Tags:
         - Key: Project
           Value: otel-demo
@@ -283,7 +283,7 @@ Resources:
       Name: otel-demo-cart-tg
       Port: 7070
       Protocol: HTTP
-      ProtocolVersion: GRPC
+      ProtocolVersion: HTTP2
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -293,7 +293,7 @@ Resources:
       UnhealthyThresholdCount: 3
       HealthCheckIntervalSeconds: 30
       Matcher:
-        GrpcCode: '0-99'
+        HttpCode: '200'
       Tags:
         - Key: Project
           Value: otel-demo
@@ -304,7 +304,7 @@ Resources:
       Name: otel-demo-prodcatalog-tg
       Port: 3550
       Protocol: HTTP
-      ProtocolVersion: GRPC
+      ProtocolVersion: HTTP2
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -314,7 +314,7 @@ Resources:
       UnhealthyThresholdCount: 3
       HealthCheckIntervalSeconds: 30
       Matcher:
-        GrpcCode: '0-99'
+        HttpCode: '200'
       Tags:
         - Key: Project
           Value: otel-demo
@@ -325,7 +325,7 @@ Resources:
       Name: otel-demo-prodreviews-tg
       Port: 3551
       Protocol: HTTP
-      ProtocolVersion: GRPC
+      ProtocolVersion: HTTP2
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -335,7 +335,7 @@ Resources:
       UnhealthyThresholdCount: 3
       HealthCheckIntervalSeconds: 30
       Matcher:
-        GrpcCode: '0-99'
+        HttpCode: '200'
       Tags:
         - Key: Project
           Value: otel-demo
