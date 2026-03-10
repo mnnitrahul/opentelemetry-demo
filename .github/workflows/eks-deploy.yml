@@ -139,17 +139,13 @@ jobs:
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
           helm repo update
 
+          # Update region in values file
+          sed -i "s/us-east-1/${{ inputs.region }}/g" scripts/helm-values-xray.yaml
+
           helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
             --namespace "${NAMESPACE}" \
             --create-namespace \
-            --set opentelemetry-collector.serviceAccount.create=false \
-            --set opentelemetry-collector.serviceAccount.name="${COLLECTOR_SA_NAME}" \
-            --set opentelemetry-collector.config.extensions.sigv4auth.region="${{ inputs.region }}" \
-            --set opentelemetry-collector.config.extensions.sigv4auth.service=xray \
-            --set 'opentelemetry-collector.config.exporters.otlphttp/xray.endpoint=https://xray.${{ inputs.region }}.amazonaws.com' \
-            --set 'opentelemetry-collector.config.exporters.otlphttp/xray.auth.authenticator=sigv4auth' \
-            --set 'opentelemetry-collector.config.service.extensions[0]=health_check' \
-            --set 'opentelemetry-collector.config.service.extensions[1]=sigv4auth' \
+            -f scripts/helm-values-xray.yaml \
             --wait \
             --timeout 10m
 

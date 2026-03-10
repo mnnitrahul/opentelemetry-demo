@@ -1,0 +1,30 @@
+opentelemetry-collector:
+  serviceAccount:
+    create: false
+    name: otel-collector
+
+  config:
+    extensions:
+      sigv4auth:
+        region: us-east-1
+        service: xray
+
+    exporters:
+      otlphttp/xray:
+        endpoint: https://xray.us-east-1.amazonaws.com
+        auth:
+          authenticator: sigv4auth
+
+    service:
+      extensions:
+        - health_check
+        - sigv4auth
+        - k8s_observer
+        - k8s_leader_elector/k8s_cluster
+      pipelines:
+        traces:
+          exporters:
+            - otlp/jaeger
+            - debug
+            - spanmetrics
+            - otlphttp/xray
