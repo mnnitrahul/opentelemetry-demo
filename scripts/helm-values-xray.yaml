@@ -1,20 +1,60 @@
+# =============================================================================
+# Helm Values: AWS Customizations for OpenTelemetry Demo
+# =============================================================================
+#
+# This file contains all customizations applied on top of the vanilla
+# opentelemetry-demo Helm chart to support AWS EKS + X-Ray deployment.
+#
+# Customizations:
+#
+# 1. Service Account (IRSA)
+#    - Disables Helm-managed SA creation
+#    - Uses the 'otel-collector' SA created by eksctl with IRSA
+#    - Provides AWS credentials to the collector pod automatically
+#    - IAM role: otel-collector-xray-role (xray:PutTraceSegments, etc.)
+#
+# 2. SigV4 Auth Extension
+#    - Signs OTLP HTTP requests with AWS Signature V4
+#    - Picks up credentials from IRSA-injected env vars
+#    - Required by all AWS OTLP endpoints (X-Ray, CloudWatch)
+#
+# 3. X-Ray OTLP Exporter
+#    - Uses standard otlphttp exporter (NOT the awsxray plugin)
+#    - Points at AWS's native OTLP endpoint: xray.<region>.amazonaws.com
+#    - Added to traces pipeline alongside Jaeger and spanmetrics
+#    - Vanilla OTel SDK + Collector, no AWS-specific SDK needed
+#
+# 4. Resource Detection (EKS + EC2)
+#    - Adds 'eks' and 'ec2' detectors to resourcedetection processor
+#    - Auto-tags all telemetry with:
+#      cloud.provider, cloud.platform (aws_eks), cloud.region,
+#      cloud.account.id, k8s.cluster.name, host.id, host.type
+#    - These are open-source OTel Contrib detectors, not AWS-proprietary
+#
+# To change region: replace all occurrences of 'us-east-1' below
+# =============================================================================
+
 opentelemetry-collector:
+  # [1] IRSA: Use eksctl-created service account with X-Ray IAM role
   serviceAccount:
     create: false
     name: otel-collector
 
   config:
+    # [2] SigV4: AWS request signing for OTLP endpoints
     extensions:
       sigv4auth:
         region: us-east-1
         service: xray
 
+    # [3] X-Ray: Standard OTLP exporter pointed at AWS endpoint
     exporters:
       otlphttp/xray:
         endpoint: https://xray.us-east-1.amazonaws.com
         auth:
           authenticator: sigv4auth
 
+    # [4] Resource Detection: Auto-discover AWS/EKS metadata
     processors:
       resourcedetection:
         detectors:
