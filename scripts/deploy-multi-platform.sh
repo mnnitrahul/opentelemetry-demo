@@ -156,6 +156,25 @@ deploy_stack() {
   echo "  Deploying stack: ${stack_name}"
   echo "  Template:        ${template_file}"
 
+  # If the stack is in ROLLBACK_COMPLETE, delete it first — it can't be updated.
+  local current_status
+  current_status=$(aws cloudformation describe-stacks \
+    --region "${REGION}" \
+    --stack-name "${stack_name}" \
+    --query 'Stacks[0].StackStatus' \
+    --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+
+  if [[ "${current_status}" == "ROLLBACK_COMPLETE" ]]; then
+    echo "  Stack is in ROLLBACK_COMPLETE state. Deleting before re-create..."
+    aws cloudformation delete-stack --region "${REGION}" --stack-name "${stack_name}"
+    aws cloudformation wait stack-delete-complete --region "${REGION}" --stack-name "${stack_name}"
+    echo "  Deleted."
+  fi
+
+  echo ""
+  echo "  Deploying stack: ${stack_name}"
+  echo "  Template:        ${template_file}"
+
   local deploy_cmd=(
     aws cloudformation deploy
     --region "${REGION}"
