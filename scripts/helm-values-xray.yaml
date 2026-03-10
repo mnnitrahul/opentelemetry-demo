@@ -15,6 +15,14 @@ opentelemetry-collector:
         auth:
           authenticator: sigv4auth
 
+    processors:
+      resourcedetection:
+        detectors:
+          - env
+          - system
+          - eks
+          - ec2
+
     service:
       extensions:
         - health_check
