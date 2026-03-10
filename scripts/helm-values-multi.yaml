@@ -1,0 +1,105 @@
+# =============================================================================
+# Helm Values: Multi-Platform Deployment Overrides
+# =============================================================================
+#
+# This file extends helm-values-xray.yaml to redirect EKS service traffic
+# to external platform endpoints and disable services that moved off EKS.
+#
+# Usage:
+#   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+#     -f helm-values-xray.yaml \
+#     -f helm-values-multi.yaml
+#
+# Placeholders (resolved by deploy-multi-platform.sh via envsubst):
+#   ${ECS_ALB_DNS}  — ECS ALB DNS name (checkout, cart, product-catalog, product-reviews)
+#   ${APIGW_URL}    — API Gateway base URL (ad, recommendation, currency, quote)
+#   ${EC2_ALB_DNS}  — EC2 ALB DNS name (payment, shipping)
+# =============================================================================
+
+# Override service addresses to point at external platforms
+default:
+  envOverrides:
+    # ECS services (via ECS ALB)
+    CART_ADDR: "${ECS_ALB_DNS}:7070"
+    CHECKOUT_ADDR: "${ECS_ALB_DNS}:5050"
+    PRODUCT_CATALOG_ADDR: "${ECS_ALB_DNS}:3550"
+    PRODUCT_REVIEWS_ADDR: "${ECS_ALB_DNS}:3551"
+    # Lambda services (via API Gateway)
+    AD_ADDR: "http://${APIGW_URL}/ad"
+    CURRENCY_ADDR: "http://${APIGW_URL}/currency"
+    RECOMMENDATION_ADDR: "http://${APIGW_URL}/recommendation"
+    QUOTE_ADDR: "http://${APIGW_URL}/quote"
+    # EC2 services (via EC2 ALB)
+    PAYMENT_ADDR: "${EC2_ALB_DNS}:50051"
+    SHIPPING_ADDR: "http://${EC2_ALB_DNS}:50050"
+
+# Prefix 'multi-' on all EKS service names so this deployment's traces
+# don't collide with the original EKS-only sample app in X-Ray.
+components:
+  frontend:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-frontend
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  frontendProxy:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-frontend-proxy
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  loadGenerator:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-load-generator
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  accounting:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-accounting
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  fraudDetection:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-fraud-detection
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  kafka:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-kafka
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  flagd:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-flagd
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  flagdUi:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-flagd-ui
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  imageProvider:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-image-provider
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  valkey:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-valkey-cart
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  postgres:
+    envOverrides:
+      OTEL_SERVICE_NAME: multi-postgresql
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+  # --- Disable services that moved off EKS ---
+  checkout:
+    enabled: false
+  cart:
+    enabled: false
+  productCatalog:
+    enabled: false
+  productReviews:
+    enabled: false
+  ad:
+    enabled: false
+  recommendation:
+    enabled: false
+  currency:
+    enabled: false
+  quote:
+    enabled: false
+  email:
+    enabled: false
+  payment:
+    enabled: false
+  shipping:
+    enabled: false

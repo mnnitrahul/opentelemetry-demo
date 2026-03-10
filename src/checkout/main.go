@@ -18,6 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log/global"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
@@ -140,6 +145,8 @@ type checkout struct {
 	emailSvcAddr          string
 	paymentSvcAddr        string
 	kafkaBrokerSvcAddr    string
+	dynamoTableName       string
+	sqsQueueURL           string
 	pb.UnimplementedCheckoutServiceServer
 	KafkaProducerClient     sarama.AsyncProducer
 	shippingSvcClient       pb.ShippingServiceClient
@@ -149,6 +156,8 @@ type checkout struct {
 	emailSvcClient          pb.EmailServiceClient
 	paymentSvcClient        pb.PaymentServiceClient
 	httpClient              *http.Client
+	dynamoClient            *dynamodb.Client
+	sqsClient               *sqs.Client
 }
 
 func main() {
@@ -238,6 +247,26 @@ func main() {
 		svc.KafkaProducerClient, err = kafka.CreateKafkaProducer([]string{svc.kafkaBrokerSvcAddr}, logger)
 		if err != nil {
 			logger.Error(err.Error())
+		}
+	}
+
+	// Initialize AWS SDK clients for DynamoDB and SQS (optional — skip if env vars not set)
+	svc.dynamoTableName = os.Getenv("DYNAMODB_TABLE_NAME")
+	svc.sqsQueueURL = os.Getenv("SQS_QUEUE_URL")
+
+	if svc.dynamoTableName != "" || svc.sqsQueueURL != "" {
+		awsCfg, awsErr := config.LoadDefaultConfig(context.Background())
+		if awsErr != nil {
+			logger.Error(fmt.Sprintf("failed to load AWS config: %v", awsErr))
+		} else {
+			if svc.dynamoTableName != "" {
+				svc.dynamoClient = dynamodb.NewFromConfig(awsCfg)
+				logger.Info(fmt.Sprintf("DynamoDB client initialized for table %q", svc.dynamoTableName))
+			}
+			if svc.sqsQueueURL != "" {
+				svc.sqsClient = sqs.NewFromConfig(awsCfg)
+				logger.Info(fmt.Sprintf("SQS client initialized for queue %q", svc.sqsQueueURL))
+			}
 		}
 	}
 
@@ -379,6 +408,20 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 		slog.Int("app.order.items.count", len(prep.orderItems)),
 		slog.String("app.shipping.tracking.id", shippingTrackingID),
 	)
+
+	// Write order to DynamoDB (non-fatal)
+	if cs.dynamoClient != nil {
+		if err := cs.writeOrderToDynamoDB(ctx, orderResult, req.UserId, req.Email, total); err != nil {
+			logger.Warn(fmt.Sprintf("failed to write order to DynamoDB: %+v", err))
+		}
+	}
+
+	// Publish order notification to SQS (non-fatal)
+	if cs.sqsClient != nil {
+		if err := cs.publishOrderNotification(ctx, req.Email, orderResult); err != nil {
+			logger.Warn(fmt.Sprintf("failed to publish order notification to SQS: %+v", err))
+		}
+	}
 
 	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
 		logger.Warn(fmt.Sprintf("failed to send order confirmation to %q: %+v", req.Email, err))
@@ -625,6 +668,155 @@ func (cs *checkout) shipOrder(ctx context.Context, address *pb.Address, items []
 	}
 
 	return shipResp.TrackingID, nil
+}
+
+func (cs *checkout) writeOrderToDynamoDB(ctx context.Context, order *pb.OrderResult, userID, email string, total *pb.Money) error {
+	ctx, span := tracer.Start(ctx, "writeOrderToDynamoDB",
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("db.system", "dynamodb"),
+		attribute.String("db.operation", "PutItem"),
+		attribute.String("db.name", "otel-demo-orders"),
+	)
+
+	// Build items list
+	items := make([]dynamodbtypes.AttributeValue, len(order.Items))
+	for i, item := range order.Items {
+		itemMap := map[string]dynamodbtypes.AttributeValue{
+			"productId": &dynamodbtypes.AttributeValueMemberS{Value: item.GetItem().GetProductId()},
+			"quantity":  &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", item.GetItem().GetQuantity())},
+		}
+		if item.Cost != nil {
+			itemMap["cost"] = &dynamodbtypes.AttributeValueMemberM{Value: map[string]dynamodbtypes.AttributeValue{
+				"currencyCode": &dynamodbtypes.AttributeValueMemberS{Value: item.Cost.GetCurrencyCode()},
+				"units":        &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", item.Cost.GetUnits())},
+				"nanos":        &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", item.Cost.GetNanos())},
+			}}
+		}
+		items[i] = &dynamodbtypes.AttributeValueMemberM{Value: itemMap}
+	}
+
+	putInput := &dynamodb.PutItemInput{
+		TableName: &cs.dynamoTableName,
+		Item: map[string]dynamodbtypes.AttributeValue{
+			"orderId":            &dynamodbtypes.AttributeValueMemberS{Value: order.OrderId},
+			"userId":             &dynamodbtypes.AttributeValueMemberS{Value: userID},
+			"email":              &dynamodbtypes.AttributeValueMemberS{Value: email},
+			"shippingTrackingId": &dynamodbtypes.AttributeValueMemberS{Value: order.ShippingTrackingId},
+			"shippingCost": &dynamodbtypes.AttributeValueMemberM{Value: map[string]dynamodbtypes.AttributeValue{
+				"currencyCode": &dynamodbtypes.AttributeValueMemberS{Value: order.ShippingCost.GetCurrencyCode()},
+				"units":        &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", order.ShippingCost.GetUnits())},
+				"nanos":        &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", order.ShippingCost.GetNanos())},
+			}},
+			"totalCost": &dynamodbtypes.AttributeValueMemberM{Value: map[string]dynamodbtypes.AttributeValue{
+				"currencyCode": &dynamodbtypes.AttributeValueMemberS{Value: total.GetCurrencyCode()},
+				"units":        &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", total.GetUnits())},
+				"nanos":        &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", total.GetNanos())},
+			}},
+			"items":     &dynamodbtypes.AttributeValueMemberL{Value: items},
+			"createdAt": &dynamodbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+		},
+	}
+
+	_, err := cs.dynamoClient.PutItem(ctx, putInput)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
+		return fmt.Errorf("DynamoDB PutItem failed: %w", err)
+	}
+
+	logger.Info(fmt.Sprintf("order %s written to DynamoDB table %s", order.OrderId, cs.dynamoTableName))
+	return nil
+}
+
+func (cs *checkout) publishOrderNotification(ctx context.Context, email string, order *pb.OrderResult) error {
+	ctx, span := tracer.Start(ctx, "publishOrderNotification",
+		trace.WithSpanKind(trace.SpanKindProducer),
+	)
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("messaging.system", "aws_sqs"),
+		attribute.String("messaging.operation", "publish"),
+		attribute.String("messaging.destination", "otel-demo-notifications"),
+	)
+
+	// Build SQS message matching the notification schema
+	type costJSON struct {
+		CurrencyCode string `json:"currencyCode"`
+		Units        int64  `json:"units"`
+		Nanos        int32  `json:"nanos"`
+	}
+	type itemJSON struct {
+		ProductID string   `json:"productId"`
+		Quantity  int32    `json:"quantity"`
+		Cost      costJSON `json:"cost"`
+	}
+	type orderJSON struct {
+		OrderID            string   `json:"orderId"`
+		ShippingTrackingID string   `json:"shippingTrackingId"`
+		ShippingCost       costJSON `json:"shippingCost"`
+		Items              []itemJSON `json:"items"`
+	}
+	type notification struct {
+		Type  string    `json:"type"`
+		Email string    `json:"email"`
+		Order orderJSON `json:"order"`
+	}
+
+	items := make([]itemJSON, len(order.Items))
+	for i, item := range order.Items {
+		items[i] = itemJSON{
+			ProductID: item.GetItem().GetProductId(),
+			Quantity:  item.GetItem().GetQuantity(),
+			Cost: costJSON{
+				CurrencyCode: item.Cost.GetCurrencyCode(),
+				Units:        item.Cost.GetUnits(),
+				Nanos:        item.Cost.GetNanos(),
+			},
+		}
+	}
+
+	msg := notification{
+		Type:  "ORDER_CONFIRMATION",
+		Email: email,
+		Order: orderJSON{
+			OrderID:            order.OrderId,
+			ShippingTrackingID: order.ShippingTrackingId,
+			ShippingCost: costJSON{
+				CurrencyCode: order.ShippingCost.GetCurrencyCode(),
+				Units:        order.ShippingCost.GetUnits(),
+				Nanos:        order.ShippingCost.GetNanos(),
+			},
+			Items: items,
+		},
+	}
+
+	msgBody, err := json.Marshal(msg)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
+		return fmt.Errorf("failed to marshal SQS message: %w", err)
+	}
+
+	msgBodyStr := string(msgBody)
+	sendInput := &sqs.SendMessageInput{
+		QueueUrl:    &cs.sqsQueueURL,
+		MessageBody: &msgBodyStr,
+	}
+
+	result, err := cs.sqsClient.SendMessage(ctx, sendInput)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
+		return fmt.Errorf("SQS SendMessage failed: %w", err)
+	}
+
+	logger.Info(fmt.Sprintf("order notification published to SQS, messageId=%s", *result.MessageId))
+	return nil
 }
 
 func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderResult) {

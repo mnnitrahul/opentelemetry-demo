@@ -22,7 +22,7 @@ http {
         listen ${IMAGE_PROVIDER_PORT};
         listen [::]:${IMAGE_PROVIDER_PORT};
 
-        resolver 127.0.0.11;
+        resolver 127.0.0.11 8.8.8.8 valid=300s;
         autoindex off;
 
         server_name _;
@@ -30,6 +30,16 @@ http {
 
         root /static;
         gzip_static on;
+
+        location /images/ {
+            proxy_pass https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/images/;
+            proxy_set_header Host ${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com;
+            proxy_hide_header x-amz-id-2;
+            proxy_hide_header x-amz-request-id;
+            proxy_hide_header x-amz-meta-server-side-encryption;
+            proxy_hide_header x-amz-server-side-encryption;
+            proxy_intercept_errors on;
+        }
 
         location /status {
             stub_status on;

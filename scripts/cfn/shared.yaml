@@ -1,0 +1,529 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  OpenTelemetry Demo - Shared Infrastructure Stack (otel-demo-shared).
+  Creates security groups, IAM roles, DynamoDB table, S3 bucket, and SQS queue
+  shared across ECS, Lambda, and EC2 platform stacks.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID (typically the EKS cluster VPC)
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet ID
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet ID
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First public subnet ID
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second public subnet ID
+
+  EksClusterSG:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: EKS cluster security group ID (used as ingress source)
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # Security Groups
+  # =========================================================================
+
+  EcsTaskSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS tasks (checkout, cart, product-catalog, product-reviews)
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: otel-demo-ecs-task-sg
+
+  LambdaSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda functions (VPC-attached)
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: otel-demo-lambda-sg
+
+  Ec2InstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 instances (payment, shipping)
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: otel-demo-ec2-instance-sg
+
+  # --- ECS Task SG Ingress Rules ---
+  # Allow EKS cluster to reach ECS services (checkout:5050, cart:7070, product-catalog:3550, product-reviews:3551)
+  EcsTaskIngressFromEksCheckout:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 5050
+      ToPort: 5050
+      SourceSecurityGroupId: !Ref EksClusterSG
+      Description: checkout from EKS
+
+  EcsTaskIngressFromEksCart:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 7070
+      ToPort: 7070
+      SourceSecurityGroupId: !Ref EksClusterSG
+      Description: cart from EKS
+
+  EcsTaskIngressFromEksProductCatalog:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 3550
+      ToPort: 3550
+      SourceSecurityGroupId: !Ref EksClusterSG
+      Description: product-catalog from EKS
+
+  EcsTaskIngressFromEksProductReviews:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 3551
+      ToPort: 3551
+      SourceSecurityGroupId: !Ref EksClusterSG
+      Description: product-reviews from EKS
+
+  # Allow ECS tasks to reach each other on service ports
+  EcsTaskIngressFromEcsCheckout:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 5050
+      ToPort: 5050
+      SourceSecurityGroupId: !Ref EcsTaskSG
+      Description: checkout from ECS tasks
+
+  EcsTaskIngressFromEcsCart:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 7070
+      ToPort: 7070
+      SourceSecurityGroupId: !Ref EcsTaskSG
+      Description: cart from ECS tasks
+
+  EcsTaskIngressFromEcsProductCatalog:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 3550
+      ToPort: 3550
+      SourceSecurityGroupId: !Ref EcsTaskSG
+      Description: product-catalog from ECS tasks
+
+  EcsTaskIngressFromEcsProductReviews:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSG
+      IpProtocol: tcp
+      FromPort: 3551
+      ToPort: 3551
+      SourceSecurityGroupId: !Ref EcsTaskSG
+      Description: product-reviews from ECS tasks
+
+  # --- EC2 Instance SG Ingress Rules ---
+  # Allow EKS cluster to reach EC2 services (payment:50051, shipping:50050)
+  Ec2IngressFromEksPayment:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref Ec2InstanceSG
+      IpProtocol: tcp
+      FromPort: 50051
+      ToPort: 50051
+      SourceSecurityGroupId: !Ref EksClusterSG
+      Description: payment from EKS
+
+  Ec2IngressFromEksShipping:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref Ec2InstanceSG
+      IpProtocol: tcp
+      FromPort: 50050
+      ToPort: 50050
+      SourceSecurityGroupId: !Ref EksClusterSG
+      Description: shipping from EKS
+
+  # Allow ECS tasks to reach EC2 services (checkout calls payment and shipping)
+  Ec2IngressFromEcsPayment:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref Ec2InstanceSG
+      IpProtocol: tcp
+      FromPort: 50051
+      ToPort: 50051
+      SourceSecurityGroupId: !Ref EcsTaskSG
+      Description: payment from ECS tasks
+
+  Ec2IngressFromEcsShipping:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref Ec2InstanceSG
+      IpProtocol: tcp
+      FromPort: 50050
+      ToPort: 50050
+      SourceSecurityGroupId: !Ref EcsTaskSG
+      Description: shipping from ECS tasks
+
+  # =========================================================================
+  # IAM Roles
+  # =========================================================================
+
+  # --- ECS Task Role ---
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: otel-demo-ecs-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: otel-demo-ecs-task-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DynamoDBWrite
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt OrdersTable.Arn
+              - Sid: SQSSend
+                Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt NotificationsQueue.Arn
+              - Sid: XRayTracing
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: !Sub arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*
+              - Sid: S3Read
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub ${AssetsBucket.Arn}/*
+
+  # --- ECS Execution Role ---
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: otel-demo-ecs-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: otel-demo-ecs-execution-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/otel-demo/*
+
+  # --- Lambda Role ---
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: otel-demo-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: otel-demo-lambda-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SQSConsume
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt NotificationsQueue.Arn
+              - Sid: XRayTracing
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: !Sub arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/otel-demo-*
+              - Sid: VPCNetworkInterface
+                Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:*
+
+  # --- EC2 Instance Role + Profile ---
+  Ec2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: otel-demo-ec2-instance-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: otel-demo-ec2-instance-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: XRayTracing
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: !Sub arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ec2/otel-demo/*
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: otel-demo-ec2-instance-profile
+      Roles:
+        - !Ref Ec2InstanceRole
+
+  # =========================================================================
+  # AWS Managed Resources
+  # =========================================================================
+
+  # --- DynamoDB Table ---
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: otel-demo-orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- S3 Bucket ---
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub otel-demo-assets-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- SQS Queue ---
+  NotificationsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: otel-demo-notifications
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- SQS Queue Policy ---
+  NotificationsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref NotificationsQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowEcsTaskRoleSend
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt EcsTaskRole.Arn
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt NotificationsQueue.Arn
+          - Sid: AllowLambdaRoleConsume
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt LambdaRole.Arn
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+            Resource: !GetAtt NotificationsQueue.Arn
+
+# ---------------------------------------------------------------------------
+# Outputs / Exports
+# ---------------------------------------------------------------------------
+Outputs:
+
+  # --- Security Groups ---
+  EcsTaskSGId:
+    Description: Security group ID for ECS tasks
+    Value: !Ref EcsTaskSG
+    Export:
+      Name: OtelDemoEcsTaskSG
+
+  LambdaSGId:
+    Description: Security group ID for Lambda functions
+    Value: !Ref LambdaSG
+    Export:
+      Name: OtelDemoLambdaSG
+
+  Ec2InstanceSGId:
+    Description: Security group ID for EC2 instances
+    Value: !Ref Ec2InstanceSG
+    Export:
+      Name: OtelDemoEc2InstanceSG
+
+  # --- IAM Roles ---
+  EcsTaskRoleArn:
+    Description: ARN of the ECS task role
+    Value: !GetAtt EcsTaskRole.Arn
+    Export:
+      Name: OtelDemoEcsTaskRoleArn
+
+  EcsExecutionRoleArn:
+    Description: ARN of the ECS execution role
+    Value: !GetAtt EcsExecutionRole.Arn
+    Export:
+      Name: OtelDemoEcsExecutionRoleArn
+
+  LambdaRoleArn:
+    Description: ARN of the Lambda execution role
+    Value: !GetAtt LambdaRole.Arn
+    Export:
+      Name: OtelDemoLambdaRoleArn
+
+  Ec2InstanceProfileArn:
+    Description: ARN of the EC2 instance profile
+    Value: !GetAtt Ec2InstanceProfile.Arn
+    Export:
+      Name: OtelDemoEc2InstanceProfileArn
+
+  # --- AWS Managed Resources ---
+  OrdersTableName:
+    Description: DynamoDB table name for order records
+    Value: !Ref OrdersTable
+    Export:
+      Name: OtelDemoOrdersTableName
+
+  AssetsBucketName:
+    Description: S3 bucket name for product assets
+    Value: !Ref AssetsBucket
+    Export:
+      Name: OtelDemoAssetsBucketName
+
+  NotificationsQueueUrl:
+    Description: SQS queue URL for order notifications
+    Value: !Ref NotificationsQueue
+    Export:
+      Name: OtelDemoNotificationsQueueUrl
+
+  NotificationsQueueArn:
+    Description: SQS queue ARN for order notifications
+    Value: !GetAtt NotificationsQueue.Arn
+    Export:
+      Name: OtelDemoNotificationsQueueArn
+
+  # --- Network (pass-through for downstream stacks) ---
+  VpcIdOutput:
+    Description: VPC ID
+    Value: !Ref VpcId
+    Export:
+      Name: OtelDemoVpcId
+
+  PrivateSubnet1Output:
+    Description: First private subnet ID
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: OtelDemoPrivateSubnet1
+
+  PrivateSubnet2Output:
+    Description: Second private subnet ID
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: OtelDemoPrivateSubnet2
+
+  PublicSubnet1Output:
+    Description: First public subnet ID
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: OtelDemoPublicSubnet1
+
+  PublicSubnet2Output:
+    Description: Second public subnet ID
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: OtelDemoPublicSubnet2

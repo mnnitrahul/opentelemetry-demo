@@ -1,0 +1,316 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  OpenTelemetry Demo - EC2 ASG Platform Stack (otel-demo-ec2).
+  Runs payment and shipping services on EC2 instances behind an
+  internet-facing ALB with gRPC-compatible target groups.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    Description: EC2 instance type for payment/shipping hosts
+
+  DesiredCapacity:
+    Type: Number
+    Default: 2
+    Description: Desired number of EC2 instances
+
+  MaxCapacity:
+    Type: Number
+    Default: 4
+    Description: Maximum number of EC2 instances
+
+  MinCapacity:
+    Type: Number
+    Default: 1
+    Description: Minimum number of EC2 instances
+
+  PaymentImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-paymentservice
+    Description: Container image for payment service
+
+  ShippingImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-shippingservice
+    Description: Container image for shipping service
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # ALB Security Group
+  # =========================================================================
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 ALB (payment/shipping)
+      VpcId: !ImportValue OtelDemoVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 50051
+          ToPort: 50051
+          CidrIp: 0.0.0.0/0
+          Description: payment gRPC
+        - IpProtocol: tcp
+          FromPort: 50050
+          ToPort: 50050
+          CidrIp: 0.0.0.0/0
+          Description: shipping gRPC
+      Tags:
+        - Key: Name
+          Value: otel-demo-ec2-alb-sg
+        - Key: Project
+          Value: otel-demo
+
+  # Allow ALB to reach EC2 instances on service ports
+  Ec2IngressFromAlbPayment:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !ImportValue OtelDemoEc2InstanceSG
+      IpProtocol: tcp
+      FromPort: 50051
+      ToPort: 50051
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: payment from ALB
+
+  Ec2IngressFromAlbShipping:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !ImportValue OtelDemoEc2InstanceSG
+      IpProtocol: tcp
+      FromPort: 50050
+      ToPort: 50050
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: shipping from ALB
+
+  # =========================================================================
+  # Application Load Balancer
+  # =========================================================================
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: otel-demo-ec2-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !ImportValue OtelDemoPublicSubnet1
+        - !ImportValue OtelDemoPublicSubnet2
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- Target Groups (gRPC-compatible: HTTP/2, protocol version gRPC) ---
+
+  PaymentTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: otel-demo-payment-tg
+      Port: 50051
+      Protocol: HTTP
+      ProtocolVersion: gRPC
+      VpcId: !ImportValue OtelDemoVpcId
+      TargetType: instance
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 30
+      Matcher:
+        GrpcCode: '0-99'
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  ShippingTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: otel-demo-shipping-tg
+      Port: 50050
+      Protocol: HTTP
+      ProtocolVersion: gRPC
+      VpcId: !ImportValue OtelDemoVpcId
+      TargetType: instance
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 30
+      Matcher:
+        GrpcCode: '0-99'
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- ALB Listeners (one per service port) ---
+
+  PaymentListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 50051
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref PaymentTargetGroup
+
+  ShippingListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 50050
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ShippingTargetGroup
+
+  # =========================================================================
+  # Launch Template
+  # =========================================================================
+
+  # SSM parameter for latest Amazon Linux 2023 AMI
+  Ec2Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: otel-demo-ec2-lt
+      LaunchTemplateData:
+        ImageId: !Ref Ec2Ami
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !ImportValue OtelDemoEc2InstanceProfileArn
+        SecurityGroupIds:
+          - !ImportValue OtelDemoEc2InstanceSG
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+
+            # Install and start Docker
+            dnf install -y docker
+            systemctl enable docker
+            systemctl start docker
+
+            # Pull service images
+            docker pull ${PaymentImage}
+            docker pull ${ShippingImage}
+
+            # Run payment service (port 50051)
+            docker run -d --restart always \
+              --name payment \
+              -p 50051:50051 \
+              -e PAYMENT_SERVICE_PORT=50051 \
+              -e OTEL_EXPORTER_OTLP_ENDPOINT=https://xray.${AWS::Region}.amazonaws.com \
+              -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+              -e OTEL_SERVICE_NAME=multi-payment \
+              -e OTEL_RESOURCE_ATTRIBUTES=service.namespace=otel-demo-multi,service.instance.id=ec2-payment \
+              ${PaymentImage}
+
+            # Run shipping service (port 50050)
+            docker run -d --restart always \
+              --name shipping \
+              -p 50050:50050 \
+              -e SHIPPING_SERVICE_PORT=50050 \
+              -e OTEL_EXPORTER_OTLP_ENDPOINT=https://xray.${AWS::Region}.amazonaws.com \
+              -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+              -e OTEL_SERVICE_NAME=multi-shipping \
+              -e OTEL_RESOURCE_ATTRIBUTES=service.namespace=otel-demo-multi,service.instance.id=ec2-shipping \
+              ${ShippingImage}
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: otel-demo-ec2-instance
+              - Key: Project
+                Value: otel-demo
+
+  # =========================================================================
+  # Auto Scaling Group
+  # =========================================================================
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !ImportValue OtelDemoPrivateSubnet1
+        - !ImportValue OtelDemoPrivateSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: !Ref MinCapacity
+      MaxSize: !Ref MaxCapacity
+      DesiredCapacity: !Ref DesiredCapacity
+      TargetGroupARNs:
+        - !Ref PaymentTargetGroup
+        - !Ref ShippingTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: otel-demo-ec2-instance
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: otel-demo
+          PropagateAtLaunch: true
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+
+  # =========================================================================
+  # CloudWatch Log Groups
+  # =========================================================================
+
+  PaymentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ec2/otel-demo/payment
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  ShippingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ec2/otel-demo/shipping
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+# ---------------------------------------------------------------------------
+# Outputs / Exports
+# ---------------------------------------------------------------------------
+Outputs:
+
+  AlbDnsName:
+    Description: EC2 ALB DNS name
+    Value: !GetAtt Alb.DNSName
+    Export:
+      Name: OtelDemoEc2AlbDns
+
+  PaymentEndpoint:
+    Description: Payment service endpoint (ALB DNS:port)
+    Value: !Sub ${Alb.DNSName}:50051
+    Export:
+      Name: OtelDemoPaymentEndpoint
+
+  ShippingEndpoint:
+    Description: Shipping service endpoint (ALB DNS:port)
+    Value: !Sub ${Alb.DNSName}:50050
+    Export:
+      Name: OtelDemoShippingEndpoint

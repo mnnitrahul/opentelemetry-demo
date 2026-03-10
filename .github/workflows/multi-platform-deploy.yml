@@ -1,0 +1,113 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# GitHub Actions workflow for deploying or destroying the multi-platform
+# OpenTelemetry Demo (EKS + ECS + Lambda + EC2).
+#
+# Authenticates via GitHub OIDC → AWS IAM, then runs the deploy or cleanup script.
+
+name: Multi-Platform Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options:
+          - deploy
+          - destroy
+      region:
+        description: "AWS region"
+        required: true
+        default: "us-east-1"
+      cluster_name:
+        description: "EKS cluster name"
+        required: true
+        default: "otel-demo"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  multi-platform:
+    name: ${{ github.event.inputs.action }} multi-platform demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.region }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ github.event.inputs.region }} \
+            --name ${{ github.event.inputs.cluster_name }}
+
+      - name: Deploy multi-platform stack
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          chmod +x ./scripts/deploy-multi-platform.sh
+          ./scripts/deploy-multi-platform.sh \
+            --region ${{ github.event.inputs.region }} \
+            --cluster ${{ github.event.inputs.cluster_name }}
+
+      - name: Destroy multi-platform stack
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          chmod +x ./scripts/cleanup-multi-platform.sh
+          echo "y" | ./scripts/cleanup-multi-platform.sh \
+            --region ${{ github.event.inputs.region }} \
+            --keep-eks
+
+      - name: Print access endpoints
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          REGION="${{ github.event.inputs.region }}"
+
+          ECS_ALB=$(aws cloudformation describe-stacks \
+            --region "${REGION}" \
+            --stack-name otel-demo-ecs \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
+            --output text 2>/dev/null || echo "N/A")
+
+          APIGW_URL=$(aws cloudformation describe-stacks \
+            --region "${REGION}" \
+            --stack-name otel-demo-lambda \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiGatewayUrl'].OutputValue" \
+            --output text 2>/dev/null || echo "N/A")
+
+          EC2_ALB=$(aws cloudformation describe-stacks \
+            --region "${REGION}" \
+            --stack-name otel-demo-ec2 \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
+            --output text 2>/dev/null || echo "N/A")
+
+          echo "============================================"
+          echo "  Multi-Platform Deployment — Access Info"
+          echo "============================================"
+          echo "ECS ALB (checkout, cart, product-catalog, product-reviews):"
+          echo "  ${ECS_ALB}"
+          echo ""
+          echo "API Gateway (ad, recommendation, currency, quote):"
+          echo "  ${APIGW_URL}"
+          echo ""
+          echo "EC2 ALB (payment, shipping):"
+          echo "  ${EC2_ALB}"
+          echo ""
+          echo "X-Ray Console:"
+          echo "  https://${REGION}.console.aws.amazon.com/xray/home#/service-map"
+          echo "============================================"

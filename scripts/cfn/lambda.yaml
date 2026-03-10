@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  OpenTelemetry Demo - Lambda Platform Stack (otel-demo-lambda).
+  Runs ad, recommendation, currency, quote, and email as Lambda functions.
+  Ad, recommendation, currency, and quote are fronted by an HTTP API Gateway.
+  Email is triggered by the SQS notifications queue.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  AdImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-adservice
+    Description: Container image for ad service
+
+  RecommendationImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-recommendationservice
+    Description: Container image for recommendation service
+
+  CurrencyImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-currencyservice
+    Description: Container image for currency service
+
+  QuoteImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-quoteservice
+    Description: Container image for quote service
+
+  EmailImage:
+    Type: String
+    Default: ghcr.io/open-telemetry/demo:latest-emailservice
+    Description: Container image for email service
+
+  LambdaTimeout:
+    Type: Number
+    Default: 60
+    Description: Lambda function timeout in seconds (handles container cold starts)
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 512
+    Description: Lambda function memory size in MB
+
+  AdotLayerArn:
+    Type: String
+    Default: arn:aws:lambda:us-east-1:901920570463:layer:aws-otel-collector-amd64-ver-0-98-0:1
+    Description: ARN of the ADOT Lambda layer for OTel instrumentation
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # Lambda Functions
+  # =========================================================================
+
+  # --- Ad Service Lambda ---
+  AdFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-ad
+      PackageType: Image
+      Code:
+        ImageUri: !Ref AdImage
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Architectures:
+        - x86_64
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+          OTEL_SERVICE_NAME: multi-ad
+          OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- Recommendation Service Lambda ---
+  RecommendationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-recommendation
+      PackageType: Image
+      Code:
+        ImageUri: !Ref RecommendationImage
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Architectures:
+        - x86_64
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+          OTEL_SERVICE_NAME: multi-recommendation
+          OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- Currency Service Lambda ---
+  CurrencyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-currency
+      PackageType: Image
+      Code:
+        ImageUri: !Ref CurrencyImage
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Architectures:
+        - x86_64
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+          OTEL_SERVICE_NAME: multi-currency
+          OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- Quote Service Lambda ---
+  QuoteFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-quote
+      PackageType: Image
+      Code:
+        ImageUri: !Ref QuoteImage
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Architectures:
+        - x86_64
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+          OTEL_SERVICE_NAME: multi-quote
+          OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # --- Email Service Lambda (SQS-triggered) ---
+  EmailFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-email
+      PackageType: Image
+      Code:
+        ImageUri: !Ref EmailImage
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Architectures:
+        - x86_64
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+          OTEL_SERVICE_NAME: multi-email
+          OTEL_RESOURCE_ATTRIBUTES: service.namespace=otel-demo-multi
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  # =========================================================================
+  # SQS Event Source Mapping (Email Lambda ← SQS Queue)
+  # =========================================================================
+
+  EmailSqsEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue OtelDemoNotificationsQueueArn
+      FunctionName: !Ref EmailFunction
+      BatchSize: 10
+      Enabled: true
+
+  # =========================================================================
+  # HTTP API Gateway
+  # =========================================================================
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: otel-demo-lambda-api
+      ProtocolType: HTTP
+      Description: HTTP API Gateway for OpenTelemetry Demo Lambda services
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+
+  # =========================================================================
+  # Lambda Permissions (allow API Gateway to invoke functions)
+  # =========================================================================
+
+  AdFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AdFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+  RecommendationFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RecommendationFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+  CurrencyFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CurrencyFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+  QuoteFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref QuoteFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+  # =========================================================================
+  # API Gateway Integrations
+  # =========================================================================
+
+  AdIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt AdFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  RecommendationIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RecommendationFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  CurrencyIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CurrencyFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  QuoteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt QuoteFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  # =========================================================================
+  # API Gateway Routes
+  # =========================================================================
+
+  # POST /ad/AdService/GetAds → ad function
+  AdGetAdsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /ad/AdService/GetAds
+      Target: !Sub integrations/${AdIntegration}
+
+  # POST /recommendation/GetRecommendations → recommendation function
+  RecommendationGetRecommendationsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /recommendation/GetRecommendations
+      Target: !Sub integrations/${RecommendationIntegration}
+
+  # POST /currency/GetSupportedCurrencies → currency function
+  CurrencyGetSupportedCurrenciesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /currency/GetSupportedCurrencies
+      Target: !Sub integrations/${CurrencyIntegration}
+
+  # POST /currency/Convert → currency function
+  CurrencyConvertRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /currency/Convert
+      Target: !Sub integrations/${CurrencyIntegration}
+
+  # POST /quote/GetQuote → quote function
+  QuoteGetQuoteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /quote/GetQuote
+      Target: !Sub integrations/${QuoteIntegration}
+
+
+# ---------------------------------------------------------------------------
+# Outputs / Exports
+# ---------------------------------------------------------------------------
+Outputs:
+
+  ApiGatewayUrl:
+    Description: HTTP API Gateway base URL for Lambda services
+    Value: !GetAtt HttpApi.ApiEndpoint
+    Export:
+      Name: OtelDemoApiGatewayUrl
+
+  AdFunctionArn:
+    Description: ARN of the ad Lambda function
+    Value: !GetAtt AdFunction.Arn
+
+  RecommendationFunctionArn:
+    Description: ARN of the recommendation Lambda function
+    Value: !GetAtt RecommendationFunction.Arn
+
+  CurrencyFunctionArn:
+    Description: ARN of the currency Lambda function
+    Value: !GetAtt CurrencyFunction.Arn
+
+  QuoteFunctionArn:
+    Description: ARN of the quote Lambda function
+    Value: !GetAtt QuoteFunction.Arn
+
+  EmailFunctionArn:
+    Description: ARN of the email Lambda function
+    Value: !GetAtt EmailFunction.Arn

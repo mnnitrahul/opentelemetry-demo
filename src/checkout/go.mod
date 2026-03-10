@@ -3,6 +3,10 @@ module github.com/open-telemetry/opentelemetry-demo/src/checkout
 go 1.25.0
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.36.3
+	github.com/aws/aws-sdk-go-v2/config v1.29.14
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.44.2
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.2
 	github.com/IBM/sarama v1.47.0
 	github.com/google/uuid v1.6.0
 	github.com/open-feature/go-sdk v1.17.1
