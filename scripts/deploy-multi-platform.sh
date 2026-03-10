@@ -304,6 +304,24 @@ for svc in "${LAMBDA_SERVICES[@]}"; do
   aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" 2>/dev/null || \
     aws ecr create-repository --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager > /dev/null
 
+  # Set ECR repo policy to allow Lambda to pull
+  aws ecr set-repository-policy --repository-name "${REPO_NAME}" --region "${REGION}" --policy-text '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "LambdaECRImageRetrievalPolicy",
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "lambda.amazonaws.com"
+        },
+        "Action": [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  }' --no-cli-pager > /dev/null 2>&1
+
   echo "  Pulling ${GHCR_IMAGE}..."
   docker pull "${GHCR_IMAGE}" --quiet
   docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
