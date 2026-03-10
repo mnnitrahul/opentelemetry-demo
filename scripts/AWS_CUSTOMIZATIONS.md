@@ -161,7 +161,76 @@ processors:
 
 ---
 
-## 6. Telemetry Pipeline (Traces)
+## 6. Span Metrics Dimensions
+
+**What:** Enriches span-derived metrics with dependency and operation labels
+so you can identify service dependencies and operations from metrics alone,
+without querying traces.
+
+**Why:** By default, `spanmetrics` only includes `service.name`, `span.name`,
+`span.kind`, and `status.code`. Adding these dimensions lets you answer
+"what does frontend depend on?" and "which operations are slow?" purely
+from Prometheus queries.
+
+**Dimensions added:**
+
+| Dimension | Purpose | Example value |
+|-----------|---------|---------------|
+| `peer.service` | Target service name (client spans) | `checkout` |
+| `server.address` | Target host (fallback) | `checkout:8080` |
+| `net.peer.name` | Target host (legacy) | `checkout` |
+| `db.system` | Database type | `redis`, `postgresql` |
+| `messaging.system` | Message broker type | `kafka` |
+| `http.route` | HTTP route pattern | `/api/products/{productId}` |
+| `rpc.service` | gRPC service name | `oteldemo.CartService` |
+| `rpc.method` | gRPC method name | `GetCart` |
+| `db.operation` | Database operation | `SELECT`, `INSERT` |
+| `db.name` | Database name | `otel` |
+| `messaging.operation` | Messaging operation | `publish`, `receive` |
+| `messaging.destination` | Queue/topic name | `orders` |
+
+```yaml
+connectors:
+  spanmetrics:
+    dimensions:
+      - name: peer.service
+      - name: server.address
+      - name: net.peer.name
+      - name: db.system
+      - name: messaging.system
+      - name: http.route
+      - name: rpc.service
+      - name: rpc.method
+      - name: db.operation
+      - name: db.name
+      - name: messaging.operation
+      - name: messaging.destination
+```
+
+**Example queries:**
+```promql
+# Frontend dependencies by peer service
+rate(traces_span_metrics_duration_milliseconds_count{
+  service_name="frontend", span_kind="SPAN_KIND_CLIENT"
+}[5m])
+
+# Slowest gRPC operations
+histogram_quantile(0.95, rate(traces_span_metrics_duration_milliseconds_bucket{
+  rpc_service!=""
+}[5m]))
+
+# Database operation breakdown
+rate(traces_span_metrics_duration_milliseconds_count{
+  db_system!=""
+}[5m])
+```
+
+**Cardinality note:** More dimensions = more metric series in Prometheus.
+If memory grows, trim to only the dimensions you actively query.
+
+---
+
+## 7. Telemetry Pipeline (Traces)
 
 **What:** Where traces flow and which exporters receive them.
 
@@ -176,7 +245,7 @@ Metrics stay on in-cluster Prometheus. Logs stay on in-cluster OpenSearch.
 
 ---
 
-## 7. Metrics Pipeline (Unchanged)
+## 8. Metrics Pipeline (Unchanged)
 
 No AWS endpoint for metrics. Stays fully in-cluster:
 
@@ -190,7 +259,7 @@ To add CloudWatch metrics in the future, add the `awsemf` exporter
 
 ---
 
-## 8. Logs Pipeline (Unchanged)
+## 9. Logs Pipeline (Unchanged)
 
 No AWS endpoint for logs configured. Stays in-cluster:
 
@@ -213,7 +282,7 @@ exporters:
 
 ---
 
-## 9. Docker Compose Changes (Local Dev)
+## 10. Docker Compose Changes (Local Dev)
 
 For local docker-compose runs (not EKS):
 
@@ -227,7 +296,7 @@ Local runs need AWS credentials mounted into the collector container.
 
 ---
 
-## 10. Files Changed from Upstream
+## 11. Files Changed from Upstream
 
 | File | Purpose |
 |------|---------|
