@@ -122,7 +122,6 @@ Resources:
       Name: otel-demo-payment-tg
       Port: 50051
       Protocol: HTTP
-      ProtocolVersion: HTTP2
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: instance
       HealthCheckEnabled: true
@@ -143,7 +142,6 @@ Resources:
       Name: otel-demo-shipping-tg
       Port: 50050
       Protocol: HTTP
-      ProtocolVersion: HTTP2
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: instance
       HealthCheckEnabled: true
