@@ -238,6 +238,18 @@ Resources:
                 Action:
                   - s3:GetObject
                 Resource: !Sub ${AssetsBucket.Arn}/*
+              - Sid: KafkaMSK
+                Effect: Allow
+                Action:
+                  - kafka-cluster:Connect
+                  - kafka-cluster:DescribeCluster
+                  - kafka-cluster:DescribeTopic
+                  - kafka-cluster:CreateTopic
+                  - kafka-cluster:WriteData
+                  - kafka-cluster:ReadData
+                  - kafka-cluster:AlterGroup
+                  - kafka-cluster:DescribeGroup
+                Resource: '*'
 
   # --- ECS Execution Role ---
   EcsExecutionRole:
@@ -467,6 +479,101 @@ Resources:
         - Key: Project
           Value: otel-demo
 
+  # --- Aurora Serverless v2 (PostgreSQL) ---
+  AuroraSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Aurora Serverless PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsTaskSG
+          Description: PostgreSQL from ECS tasks
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EksClusterSG
+          Description: PostgreSQL from EKS
+      Tags:
+        - Key: Name
+          Value: otel-demo-aurora-sg
+
+  AuroraSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: otel-demo-aurora-subnets
+      DBSubnetGroupDescription: Subnets for Aurora Serverless v2
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: otel-demo-postgres
+      Engine: aurora-postgresql
+      EngineVersion: '16.4'
+      MasterUsername: otelu
+      MasterUserPassword: otelpassword123
+      DatabaseName: otel
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref AuroraSG
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 4
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: otel-demo-postgres-instance
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+
+  # --- MSK Serverless (Kafka) ---
+  MskSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for MSK Serverless
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 9098
+          ToPort: 9098
+          SourceSecurityGroupId: !Ref EcsTaskSG
+          Description: Kafka from ECS tasks
+        - IpProtocol: tcp
+          FromPort: 9098
+          ToPort: 9098
+          SourceSecurityGroupId: !Ref EksClusterSG
+          Description: Kafka from EKS
+      Tags:
+        - Key: Name
+          Value: otel-demo-msk-sg
+
+  MskServerless:
+    Type: AWS::MSK::ServerlessCluster
+    Properties:
+      ClusterName: otel-demo-kafka
+      ClientAuthentication:
+        Sasl:
+          Iam:
+            Enabled: true
+      VpcConfigs:
+        - SubnetIds:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref MskSG
+      Tags:
+        Project: otel-demo
+
 # ---------------------------------------------------------------------------
 # Outputs / Exports
 # ---------------------------------------------------------------------------
@@ -577,3 +684,33 @@ Outputs:
     Value: !Sub ${ValkeyServerless.Endpoint.Address}:${ValkeyServerless.Endpoint.Port}
     Export:
       Name: OtelDemoValkeyEndpoint
+
+  AuroraEndpoint:
+    Description: Aurora Serverless PostgreSQL endpoint
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: OtelDemoAuroraEndpoint
+
+  AuroraPort:
+    Description: Aurora Serverless PostgreSQL port
+    Value: !GetAtt AuroraCluster.Endpoint.Port
+    Export:
+      Name: OtelDemoAuroraPort
+
+  AuroraConnectionString:
+    Description: PostgreSQL connection string for services
+    Value: !Sub Host=${AuroraCluster.Endpoint.Address};Port=${AuroraCluster.Endpoint.Port};Username=otelu;Password=otelpassword123;Database=otel
+    Export:
+      Name: OtelDemoAuroraConnectionString
+
+  MskClusterArn:
+    Description: MSK Serverless cluster ARN
+    Value: !Ref MskServerless
+    Export:
+      Name: OtelDemoMskClusterArn
+
+  MskBootstrapBrokers:
+    Description: MSK bootstrap brokers (resolved by deploy script)
+    Value: !Ref MskServerless
+    Export:
+      Name: OtelDemoMskBootstrapBrokers

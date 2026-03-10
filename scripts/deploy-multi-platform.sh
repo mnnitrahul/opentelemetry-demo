@@ -267,7 +267,21 @@ deploy_stack "${SHARED_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${SHARED_STACK}]}" 
   "EksClusterSG=${EKS_SG}"
 
 # --- ECS stack (depends on shared) ---
-deploy_stack "${ECS_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${ECS_STACK}]}"
+# Resolve MSK bootstrap brokers (not available as CFN attribute)
+MSK_CLUSTER_ARN=$(get_stack_output "${SHARED_STACK}" "MskClusterArn")
+MSK_BOOTSTRAP=""
+if [[ -n "${MSK_CLUSTER_ARN}" && "${MSK_CLUSTER_ARN}" != "None" ]]; then
+  echo "  Resolving MSK bootstrap brokers..."
+  MSK_BOOTSTRAP=$(aws kafka get-bootstrap-brokers \
+    --region "${REGION}" \
+    --cluster-arn "${MSK_CLUSTER_ARN}" \
+    --query 'BootstrapBrokerStringSaslIam' \
+    --output text 2>/dev/null || echo "")
+  echo "  MSK Bootstrap: ${MSK_BOOTSTRAP}"
+fi
+
+deploy_stack "${ECS_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${ECS_STACK}]}" \
+  "MskBootstrapBrokers=${MSK_BOOTSTRAP}"
 
 # --- Lambda stack (depends on shared) ---
 deploy_stack "${LAMBDA_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${LAMBDA_STACK}]}"

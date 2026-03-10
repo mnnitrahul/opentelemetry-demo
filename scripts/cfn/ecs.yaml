@@ -18,6 +18,11 @@ Parameters:
     Default: ''
     Description: EC2 ALB DNS name for EC2 services (payment, shipping)
 
+  MskBootstrapBrokers:
+    Type: String
+    Default: ''
+    Description: MSK Serverless bootstrap brokers endpoint
+
   EcsInstanceType:
     Type: String
     Default: t3.large
@@ -476,6 +481,8 @@ Resources:
               Value: !ImportValue OtelDemoOrdersTableName
             - Name: SQS_QUEUE_URL
               Value: !ImportValue OtelDemoNotificationsQueueUrl
+            - Name: KAFKA_ADDR
+              Value: !Ref MskBootstrapBrokers
             - Name: AWS_REGION
               Value: !Ref AWS::Region
 
@@ -557,6 +564,8 @@ Resources:
               Value: multi-product-catalog
             - Name: OTEL_RESOURCE_ATTRIBUTES
               Value: service.namespace=otel-demo-multi,service.instance.id=ecs-product-catalog
+            - Name: DB_CONNECTION_STRING
+              Value: !ImportValue OtelDemoAuroraConnectionString
             - Name: AWS_REGION
               Value: !Ref AWS::Region
 
@@ -598,6 +607,8 @@ Resources:
             # product-reviews may need to call product-catalog
             - Name: PRODUCT_CATALOG_SERVICE_ADDR
               Value: !Sub ${Alb.DNSName}:3550
+            - Name: DB_CONNECTION_STRING
+              Value: !ImportValue OtelDemoAuroraConnectionString
             - Name: AWS_REGION
               Value: !Ref AWS::Region
 

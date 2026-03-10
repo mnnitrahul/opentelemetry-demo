@@ -227,6 +227,23 @@ POLICY_DOC=$(cat <<'EOF'
       "Resource": "*"
     },
     {
+      "Sid": "RDS",
+      "Effect": "Allow",
+      "Action": [
+        "rds:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MSK",
+      "Effect": "Allow",
+      "Action": [
+        "kafka:*",
+        "kafka-cluster:*"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "S3ForLambdaAndCFN",
       "Effect": "Allow",
       "Action": [
