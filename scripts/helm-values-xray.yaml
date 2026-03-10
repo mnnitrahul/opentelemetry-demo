@@ -63,6 +63,25 @@ opentelemetry-collector:
           - eks
           - ec2
 
+    # [5] Span Metrics: Add dependency and operation dimensions
+    connectors:
+      spanmetrics:
+        dimensions:
+          # Dependency identification
+          - name: peer.service
+          - name: server.address
+          - name: net.peer.name
+          - name: db.system
+          - name: messaging.system
+          # Operation identification
+          - name: http.route
+          - name: rpc.service
+          - name: rpc.method
+          - name: db.operation
+          - name: db.name
+          - name: messaging.operation
+          - name: messaging.destination
+
     service:
       extensions:
         - health_check
