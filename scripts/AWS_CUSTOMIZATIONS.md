@@ -343,14 +343,22 @@ and trim dimensions you don't actively query.
 ## B5. How Dependency Graphs Are Generated
 
 Three different tools generate dependency/service map views, each using
-a different approach:
+a different approach and different span attributes:
 
 ### X-Ray Service Map
 
 **How it works:** X-Ray builds the service map server-side from ingested
-trace segments. When the collector sends spans via the OTLP endpoint,
-X-Ray reconstructs the call graph by analyzing parent-child span
-relationships within each trace.
+trace segments. It reconstructs the call graph by analyzing parent-child
+span relationships within each trace.
+
+**Span attributes used:**
+
+| Attribute | Role |
+|-----------|------|
+| `service.name` (resource) | Labels each node in the map |
+| `span.kind` | Distinguishes caller (CLIENT) from callee (SERVER) |
+| `trace_id` | Groups spans into the same trace |
+| `parent_span_id` | Links child span to parent to draw edges |
 
 ```
 Trace abc123:
@@ -361,46 +369,63 @@ Trace abc123:
 X-Ray derives: frontend → checkout → payment
 ```
 
-X-Ray uses `service.name` from resource attributes to label nodes, and
-the span parent/child hierarchy to draw edges. It also uses `span.kind`
-to distinguish callers (CLIENT) from callees (SERVER). The map updates
-continuously as new traces arrive.
-
 **No collector config needed** — X-Ray does this automatically from the
 raw trace data we're already sending via `otlphttp/xray`.
 
 ### Jaeger Trace View
 
-**How it works:** Jaeger doesn't generate a service map. Instead, when
-you open an individual trace, the span waterfall shows the call chain
-for that specific request. Each span shows `service.name` and the
-operation name, with indentation showing parent-child nesting.
+**How it works:** Jaeger doesn't generate a service map. When you open
+an individual trace, the span waterfall shows the call chain for that
+specific request.
 
-```
-▼ frontend: GET /api/checkout          200ms
-  ▼ checkout: PlaceOrder               180ms
-    ▼ payment: Charge                   50ms
-    ▼ shipping: ShipOrder               30ms
-    ▼ email: SendOrderConfirmation      20ms
-```
+**Span attributes used:**
+
+| Attribute | Role |
+|-----------|------|
+| `service.name` (resource) | Labels each span's service |
+| `span.name` | Shows the operation (e.g., `GET /api/cart`) |
+| `trace_id` | Groups spans into the same trace |
+| `parent_span_id` | Determines nesting/indentation |
+| `start_time`, `duration` | Positions spans on the timeline |
 
 **No collector config needed** — Jaeger renders this from stored traces.
 
-### Grafana (via Prometheus Metrics)
+### Grafana via spanmetrics (current setup, B4)
 
-**How it works:** Grafana doesn't have access to raw traces (it queries
-Prometheus for metrics). To show dependencies, it needs metrics that
-encode the caller→callee relationship. There are two approaches:
+**How it works:** The `spanmetrics` connector generates per-span metrics.
+We added dependency attributes as dimensions so you can derive
+dependencies from CLIENT span metrics.
 
-**Approach 1: spanmetrics dimensions (what we configured in B4)**
+**Client span attributes used for dependency identification:**
 
-The `spanmetrics` connector generates per-span metrics. By adding
-`net_peer_name`, `rpc_service`, `peer.service` as dimensions, the
-metrics carry enough information to derive dependencies:
+| Attribute | What it identifies | Example |
+|-----------|-------------------|---------|
+| `peer.service` | Target service name (set by OTel SDK) | `checkout` |
+| `net.peer.name` | Target hostname (set by instrumentation) | `checkout` |
+| `server.address` | Target host (newer semconv) | `checkout:8080` |
+| `db.system` | Database dependency (no server span exists) | `postgresql`, `redis` |
+| `messaging.system` | Broker dependency (no server span exists) | `kafka` |
+
+**Client span attributes used for operation identification:**
+
+| Attribute | What it identifies | Example |
+|-----------|-------------------|---------|
+| `http.route` | HTTP endpoint pattern | `/api/products/{productId}` |
+| `rpc.service` | gRPC service name | `oteldemo.CartService` |
+| `rpc.method` | gRPC method | `GetCart` |
+| `db.operation` | Database operation | `SELECT` |
+| `db.name` | Database name | `otel` |
+| `messaging.operation` | Messaging operation | `publish` |
+| `messaging.destination` | Queue/topic name | `orders` |
+
+**Key:** `span.kind = SPAN_KIND_CLIENT` identifies outgoing calls.
+The combination of `service_name` (who's calling) + `net_peer_name`
+or `peer.service` (who's being called) + `rpc_service`/`rpc_method`
+(what operation) gives you the full dependency picture.
 
 ```promql
-# "frontend calls these services"
-group by (net_peer_name) (
+# "frontend calls these services via these operations"
+group by (net_peer_name, rpc_service, rpc_method) (
   traces_span_metrics_duration_milliseconds_count{
     service_name="frontend",
     span_kind="SPAN_KIND_CLIENT"
@@ -408,50 +433,55 @@ group by (net_peer_name) (
 )
 ```
 
-This works because CLIENT spans represent outgoing calls, and
-`net_peer_name` identifies the target. But it only shows one side —
-you query per-service, not the full graph.
+### Grafana via servicegraph connector (not enabled)
 
-**Approach 2: servicegraph connector (not currently enabled)**
+**How it works:** The `servicegraph` connector is purpose-built for
+dependency graphs. Instead of looking at individual spans, it matches
+CLIENT-SERVER span pairs within the same trace to emit edge metrics.
 
-The `servicegraph` connector is purpose-built for dependency graphs.
-It analyzes pairs of CLIENT and SERVER spans within the same trace
-to emit edge metrics:
+**Span attributes used for matching:**
 
+| Step | Attribute | Purpose |
+|------|-----------|---------|
+| 1. Find client span | `span.kind = CLIENT` | Identifies outgoing call |
+| 2. Find server span | `span.kind = SERVER` | Identifies incoming call |
+| 3. Match them | `trace_id` + `parent_span_id` | Links client to server |
+| 4. Label client node | `service.name` (resource) on client span | e.g., `frontend` |
+| 5. Label server node | `service.name` (resource) on server span | e.g., `checkout` |
+
+**For "virtual" nodes** (databases, message brokers) where no server
+span exists, it falls back to client span attributes:
+
+| Fallback attribute | When used | Example |
+|-------------------|-----------|---------|
+| `peer.service` | First choice for naming the server node | `redis` |
+| `server.address` | If `peer.service` absent | `postgresql:5432` |
+| `db.system` | For database calls | `postgresql` |
+| `messaging.system` | For messaging calls | `kafka` |
+
+**Output metrics:**
 ```
 traces_service_graph_request_total{client="frontend", server="checkout"} = 50
-traces_service_graph_request_total{client="checkout", server="payment"} = 30
+traces_service_graph_request_failed_total{client="checkout", server="payment"} = 2
+traces_service_graph_request_duration_seconds_bucket{client="frontend", server="ad", le="0.1"} = 45
 ```
 
-It matches spans by:
-1. Finding a CLIENT span in service A with `trace_id=X`, `span_id=Y`
-2. Finding a SERVER span in service B with `trace_id=X`, `parent_span_id=Y`
-3. Emitting a metric with `client=A`, `server=B`
-
-For database/messaging calls where there's no server span, it falls
-back to `db.system`, `messaging.system`, or `peer.service` from the
-client span.
-
-To enable it, add to `helm-values-xray.yaml`:
+**Not currently enabled** because the spanmetrics dimensions (B4) plus
+X-Ray service map already provide dependency visibility. To enable,
+add to `helm-values-xray.yaml`:
 ```yaml
 connectors:
   servicegraph:
-    latency_histogram_buckets: [1, 2, 5, 10, 50, 100, 500, 1000]
-    dimensions:
-      - http.route
-      - rpc.method
     store:
-      ttl: 2s
-      max_items: 1000
+      max_items: 10000
+      ttl: 5s
+    latency_histogram_buckets: [10ms, 50ms, 100ms, 250ms, 500ms, 1s, 5s]
+    dimensions:
+      - service.name
+      - service.namespace
 ```
-
 And add `servicegraph` to the traces pipeline exporters and as a
 receiver in the metrics pipeline.
-
-**Current state:** We use Approach 1 (spanmetrics dimensions). X-Ray
-provides the best dependency graph view. Grafana can query dependencies
-per-service via PromQL. The `servicegraph` connector is available but
-not enabled to keep the config simple.
 
 ---
 
