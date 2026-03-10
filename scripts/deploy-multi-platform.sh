@@ -283,8 +283,43 @@ fi
 deploy_stack "${ECS_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${ECS_STACK}]}" \
   "MskBootstrapBrokers=${MSK_BOOTSTRAP}"
 
+# --- Mirror Lambda images from ghcr.io to ECR (Lambda only supports ECR) ---
+echo ""
+echo "  Mirroring Lambda images to ECR..."
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+
+# Login to ECR
+aws ecr get-login-password --region "${REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}" 2>/dev/null
+
+LAMBDA_SERVICES=("adservice" "recommendationservice" "currencyservice" "quoteservice" "emailservice")
+declare -A ECR_IMAGES
+
+for svc in "${LAMBDA_SERVICES[@]}"; do
+  REPO_NAME="otel-demo/${svc}"
+  GHCR_IMAGE="ghcr.io/open-telemetry/demo:latest-${svc}"
+  ECR_IMAGE="${ECR_REGISTRY}/${REPO_NAME}:latest"
+
+  # Create ECR repo if not exists
+  aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" 2>/dev/null || \
+    aws ecr create-repository --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager > /dev/null
+
+  echo "  Pulling ${GHCR_IMAGE}..."
+  docker pull "${GHCR_IMAGE}" --quiet
+  docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
+  echo "  Pushing to ${ECR_IMAGE}..."
+  docker push "${ECR_IMAGE}" --quiet
+
+  ECR_IMAGES["${svc}"]="${ECR_IMAGE}"
+done
+
 # --- Lambda stack (depends on shared) ---
-deploy_stack "${LAMBDA_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${LAMBDA_STACK}]}"
+deploy_stack "${LAMBDA_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${LAMBDA_STACK}]}" \
+  "AdImage=${ECR_IMAGES[adservice]}" \
+  "RecommendationImage=${ECR_IMAGES[recommendationservice]}" \
+  "CurrencyImage=${ECR_IMAGES[currencyservice]}" \
+  "QuoteImage=${ECR_IMAGES[quoteservice]}" \
+  "EmailImage=${ECR_IMAGES[emailservice]}"
 
 # --- EC2 stack (depends on shared) ---
 deploy_stack "${EC2_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${EC2_STACK}]}"
