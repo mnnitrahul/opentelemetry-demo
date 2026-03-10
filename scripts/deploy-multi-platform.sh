@@ -164,8 +164,8 @@ deploy_stack() {
     --query 'Stacks[0].StackStatus' \
     --output text 2>/dev/null || echo "DOES_NOT_EXIST")
 
-  if [[ "${current_status}" == "ROLLBACK_COMPLETE" ]]; then
-    echo "  Stack is in ROLLBACK_COMPLETE state. Deleting before re-create..."
+  if [[ "${current_status}" == "ROLLBACK_COMPLETE" || "${current_status}" == "ROLLBACK_FAILED" ]]; then
+    echo "  Stack is in ${current_status} state. Deleting before re-create..."
     aws cloudformation delete-stack --region "${REGION}" --stack-name "${stack_name}"
     aws cloudformation wait stack-delete-complete --region "${REGION}" --stack-name "${stack_name}"
     echo "  Deleted."
