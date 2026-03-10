@@ -211,16 +211,7 @@ POLICY_DOC=$(cat <<'EOF'
       "Sid": "SQS",
       "Effect": "Allow",
       "Action": [
-        "sqs:CreateQueue",
-        "sqs:DeleteQueue",
-        "sqs:GetQueueAttributes",
-        "sqs:SetQueueAttributes",
-        "sqs:TagQueue",
-        "sqs:UntagQueue",
-        "sqs:ListQueueTags",
-        "sqs:SendMessage",
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage"
+        "sqs:*"
       ],
       "Resource": "*"
     },
@@ -228,16 +219,7 @@ POLICY_DOC=$(cat <<'EOF'
       "Sid": "DynamoDB",
       "Effect": "Allow",
       "Action": [
-        "dynamodb:CreateTable",
-        "dynamodb:DeleteTable",
-        "dynamodb:DescribeTable",
-        "dynamodb:UpdateTable",
-        "dynamodb:TagResource",
-        "dynamodb:UntagResource",
-        "dynamodb:ListTagsOfResource",
-        "dynamodb:PutItem",
-        "dynamodb:GetItem",
-        "dynamodb:DeleteItem"
+        "dynamodb:*"
       ],
       "Resource": "*"
     },
@@ -245,13 +227,7 @@ POLICY_DOC=$(cat <<'EOF'
       "Sid": "S3ForLambdaAndCFN",
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:ListBucket",
-        "s3:CreateBucket",
-        "s3:DeleteBucket",
-        "s3:GetBucketLocation"
+        "s3:*"
       ],
       "Resource": "*"
     },
