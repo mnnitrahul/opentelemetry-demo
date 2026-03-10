@@ -169,12 +169,7 @@ POLICY_DOC=$(cat <<'EOF'
       "Sid": "CloudWatchLogs",
       "Effect": "Allow",
       "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents",
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams",
-        "logs:TagResource"
+        "logs:*"
       ],
       "Resource": "*"
     },
