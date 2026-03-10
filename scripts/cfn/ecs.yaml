@@ -262,7 +262,7 @@ Resources:
       Name: otel-demo-checkout-tg
       Port: 5050
       Protocol: HTTP
-      ProtocolVersion: gRPC
+      ProtocolVersion: GRPC
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -283,7 +283,7 @@ Resources:
       Name: otel-demo-cart-tg
       Port: 7070
       Protocol: HTTP
-      ProtocolVersion: gRPC
+      ProtocolVersion: GRPC
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -304,7 +304,7 @@ Resources:
       Name: otel-demo-prodcatalog-tg
       Port: 3550
       Protocol: HTTP
-      ProtocolVersion: gRPC
+      ProtocolVersion: GRPC
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
@@ -325,7 +325,7 @@ Resources:
       Name: otel-demo-prodreviews-tg
       Port: 3551
       Protocol: HTTP
-      ProtocolVersion: gRPC
+      ProtocolVersion: GRPC
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckEnabled: true
