@@ -43,6 +43,11 @@ Parameters:
     Default: 2
     Description: Desired number of tasks per ECS service
 
+  EcsOptimizedAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
+    Description: ECS-optimized AMI ID (resolved from SSM parameter)
+
   CheckoutImage:
     Type: String
     Default: ghcr.io/open-telemetry/demo:latest-checkoutservice
@@ -76,6 +81,11 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: otel-demo-ecs
+
+  EcsClusterCapacityProviderAssociation:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      Cluster: !Ref EcsCluster
       CapacityProviders:
         - !Ref EcsCapacityProvider
       DefaultCapacityProviderStrategy:
@@ -130,11 +140,6 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             echo ECS_CLUSTER=${EcsCluster} >> /etc/ecs/ecs.config
-
-  # SSM parameter for latest ECS-optimized AMI
-  EcsOptimizedAmi:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
 
   # IAM role for ECS container instances
   EcsInstanceRole:
