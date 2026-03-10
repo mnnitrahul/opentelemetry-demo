@@ -340,7 +340,122 @@ and trim dimensions you don't actively query.
 
 ---
 
-## B5. Telemetry Pipelines Summary
+## B5. How Dependency Graphs Are Generated
+
+Three different tools generate dependency/service map views, each using
+a different approach:
+
+### X-Ray Service Map
+
+**How it works:** X-Ray builds the service map server-side from ingested
+trace segments. When the collector sends spans via the OTLP endpoint,
+X-Ray reconstructs the call graph by analyzing parent-child span
+relationships within each trace.
+
+```
+Trace abc123:
+  frontend (span 1, kind=SERVER)
+    → checkout (span 2, kind=CLIENT, parent=1)
+      → payment (span 3, kind=CLIENT, parent=2)
+
+X-Ray derives: frontend → checkout → payment
+```
+
+X-Ray uses `service.name` from resource attributes to label nodes, and
+the span parent/child hierarchy to draw edges. It also uses `span.kind`
+to distinguish callers (CLIENT) from callees (SERVER). The map updates
+continuously as new traces arrive.
+
+**No collector config needed** — X-Ray does this automatically from the
+raw trace data we're already sending via `otlphttp/xray`.
+
+### Jaeger Trace View
+
+**How it works:** Jaeger doesn't generate a service map. Instead, when
+you open an individual trace, the span waterfall shows the call chain
+for that specific request. Each span shows `service.name` and the
+operation name, with indentation showing parent-child nesting.
+
+```
+▼ frontend: GET /api/checkout          200ms
+  ▼ checkout: PlaceOrder               180ms
+    ▼ payment: Charge                   50ms
+    ▼ shipping: ShipOrder               30ms
+    ▼ email: SendOrderConfirmation      20ms
+```
+
+**No collector config needed** — Jaeger renders this from stored traces.
+
+### Grafana (via Prometheus Metrics)
+
+**How it works:** Grafana doesn't have access to raw traces (it queries
+Prometheus for metrics). To show dependencies, it needs metrics that
+encode the caller→callee relationship. There are two approaches:
+
+**Approach 1: spanmetrics dimensions (what we configured in B4)**
+
+The `spanmetrics` connector generates per-span metrics. By adding
+`net_peer_name`, `rpc_service`, `peer.service` as dimensions, the
+metrics carry enough information to derive dependencies:
+
+```promql
+# "frontend calls these services"
+group by (net_peer_name) (
+  traces_span_metrics_duration_milliseconds_count{
+    service_name="frontend",
+    span_kind="SPAN_KIND_CLIENT"
+  }
+)
+```
+
+This works because CLIENT spans represent outgoing calls, and
+`net_peer_name` identifies the target. But it only shows one side —
+you query per-service, not the full graph.
+
+**Approach 2: servicegraph connector (not currently enabled)**
+
+The `servicegraph` connector is purpose-built for dependency graphs.
+It analyzes pairs of CLIENT and SERVER spans within the same trace
+to emit edge metrics:
+
+```
+traces_service_graph_request_total{client="frontend", server="checkout"} = 50
+traces_service_graph_request_total{client="checkout", server="payment"} = 30
+```
+
+It matches spans by:
+1. Finding a CLIENT span in service A with `trace_id=X`, `span_id=Y`
+2. Finding a SERVER span in service B with `trace_id=X`, `parent_span_id=Y`
+3. Emitting a metric with `client=A`, `server=B`
+
+For database/messaging calls where there's no server span, it falls
+back to `db.system`, `messaging.system`, or `peer.service` from the
+client span.
+
+To enable it, add to `helm-values-xray.yaml`:
+```yaml
+connectors:
+  servicegraph:
+    latency_histogram_buckets: [1, 2, 5, 10, 50, 100, 500, 1000]
+    dimensions:
+      - http.route
+      - rpc.method
+    store:
+      ttl: 2s
+      max_items: 1000
+```
+
+And add `servicegraph` to the traces pipeline exporters and as a
+receiver in the metrics pipeline.
+
+**Current state:** We use Approach 1 (spanmetrics dimensions). X-Ray
+provides the best dependency graph view. Grafana can query dependencies
+per-service via PromQL. The `servicegraph` connector is available but
+not enabled to keep the config simple.
+
+---
+
+## B6. Telemetry Pipelines Summary
 
 **Traces pipeline (customized):**
 ```
