@@ -94,7 +94,8 @@ Resources:
             set -euo pipefail
             dnf install -y docker
             systemctl enable docker && systemctl start docker
-            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin $(echo ${InventoryImage} | cut -d/ -f1)
+            ECR_REGISTRY=$(echo "${InventoryImage}" | cut -d/ -f1)
+            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${!ECR_REGISTRY}
             docker pull ${InventoryImage}
             docker run -d --restart always --name inventory -p 8080:8080 \
               -e SERVICE_PORT=8080 \
