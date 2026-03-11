@@ -79,12 +79,21 @@ jobs:
           kubectl label serviceaccount otel-collector -n "${NAMESPACE}" \
             app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null || true
 
+          # Fix ClusterRole ownership back to original release (may have been relabeled)
+          for resource in clusterrole/otel-collector clusterrolebinding/otel-collector; do
+            kubectl annotate "${resource}" \
+              meta.helm.sh/release-name=otel-demo \
+              meta.helm.sh/release-namespace="${NAMESPACE}" \
+              --overwrite 2>/dev/null || true
+          done
+
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
           helm repo update
           sed "s/us-east-1/${REGION}/g" scripts/helm-values-xray.yaml > /tmp/helm-values-xray.yaml
           helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
             --namespace "${NAMESPACE}" --create-namespace \
-            -f /tmp/helm-values-xray.yaml --wait --timeout 10m
+            -f /tmp/helm-values-xray.yaml --wait --timeout 10m \
+            --force
 
       - name: Deploy multi-platform app (separate cluster + CFN stacks)
         run: |
