@@ -307,17 +307,11 @@ for svc in "${LAMBDA_SERVICES[@]}"; do
   fi
 
   # Set ECR repo policy to allow Lambda to pull
-  aws ecr set-repository-policy --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager --policy-text '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Sid": "LambdaECRImageRetrievalPolicy",
-        "Effect": "Allow",
-        "Principal": { "Service": "lambda.amazonaws.com" },
-        "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
-      }
-    ]
-  }' > /dev/null 2>&1 || true
+  aws ecr set-repository-policy \
+    --repository-name "${REPO_NAME}" \
+    --region "${REGION}" \
+    --policy-text '{"Version":"2012-10-17","Statement":[{"Sid":"LambdaECRPull","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"]}]}' \
+    > /dev/null 2>&1 || echo "  Warning: could not set repo policy on ${REPO_NAME}"
 
   # Check if image already exists in ECR — skip pull/push if so
   if aws ecr describe-images --repository-name "${REPO_NAME}" --region "${REGION}" \
