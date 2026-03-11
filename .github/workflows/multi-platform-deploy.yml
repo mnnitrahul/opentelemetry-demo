@@ -1,10 +1,5 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
-#
-# GitHub Actions workflow for deploying or destroying the multi-platform
-# OpenTelemetry Demo (EKS + ECS + Lambda + EC2).
-#
-# Authenticates via GitHub OIDC → AWS IAM, then runs the deploy or cleanup script.
 
 name: Multi-Platform Deploy
 
@@ -34,18 +29,16 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  ACTION: ${{ github.event.inputs.action || 'deploy' }}
-  REGION: ${{ github.event.inputs.region || 'us-east-1' }}
-  CLUSTER_NAME: ${{ github.event.inputs.cluster_name || 'otel-demo' }}
-
 jobs:
   multi-platform:
-    name: ${{ env.ACTION }} multi-platform demo
+    name: deploy multi-platform demo
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
+    env:
+      REGION: ${{ github.event.inputs.region || 'us-east-1' }}
+      CLUSTER_NAME: ${{ github.event.inputs.cluster_name || 'otel-demo' }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -53,143 +46,92 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.REGION }}
 
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-helm@v4
 
       - name: Install eksctl
         run: |
-          ARCH=amd64
-          PLATFORM=$(uname -s)_$ARCH
-          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
-          tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp
-          sudo mv /tmp/eksctl /usr/local/bin
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
+          tar -xzf eksctl_*.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
 
       - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig \
-            --region ${{ env.REGION }} \
-            --name ${{ env.CLUSTER_NAME }}
+        run: aws eks update-kubeconfig --region ${{ env.REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: Deploy original EKS app first
-        if: github.event.inputs.action == 'deploy'
-        env:
-          NAMESPACE: otel-demo
-          XRAY_POLICY_NAME: otel-collector-xray-policy
-          XRAY_ROLE_NAME: otel-collector-xray-role
-          COLLECTOR_SA_NAME: otel-collector
+      - name: Deploy original EKS app
         run: |
           REGION="${{ env.REGION }}"
           CLUSTER="${{ env.CLUSTER_NAME }}"
+          NAMESPACE="otel-demo"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${XRAY_POLICY_NAME}"
+          POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/otel-collector-xray-policy"
 
-          # Create IAM policy if not exists
-          if ! aws iam get-policy --policy-arn "${POLICY_ARN}" &> /dev/null; then
-            POLICY_ARN=$(aws iam create-policy \
-              --policy-name "${XRAY_POLICY_NAME}" \
-              --policy-document '{
-                "Version": "2012-10-17",
-                "Statement": [{
-                  "Effect": "Allow",
-                  "Action": [
-                    "xray:PutTraceSegments",
-                    "xray:PutTelemetryRecords",
-                    "xray:GetSamplingRules",
-                    "xray:GetSamplingTargets"
-                  ],
-                  "Resource": "*"
-                }]
-              }' \
+          if ! aws iam get-policy --policy-arn "${POLICY_ARN}" &>/dev/null; then
+            POLICY_ARN=$(aws iam create-policy --policy-name otel-collector-xray-policy \
+              --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets"],"Resource":"*"}]}' \
               --query 'Policy.Arn' --output text)
           fi
 
-          # Create IRSA for otel-collector in otel-demo namespace
-          eksctl create iamserviceaccount \
-            --name "${COLLECTOR_SA_NAME}" \
-            --namespace "${NAMESPACE}" \
-            --cluster "${CLUSTER}" \
-            --region "${REGION}" \
-            --attach-policy-arn "${POLICY_ARN}" \
-            --role-name "${XRAY_ROLE_NAME}" \
-            --approve \
-            --override-existing-serviceaccounts || true
+          eksctl create iamserviceaccount --name otel-collector --namespace "${NAMESPACE}" \
+            --cluster "${CLUSTER}" --region "${REGION}" --attach-policy-arn "${POLICY_ARN}" \
+            --role-name otel-collector-xray-role --approve --override-existing-serviceaccounts || true
 
-          # Adopt SA for Helm
-          kubectl annotate serviceaccount "${COLLECTOR_SA_NAME}" \
-            -n "${NAMESPACE}" \
-            meta.helm.sh/release-name=otel-demo \
-            meta.helm.sh/release-namespace="${NAMESPACE}" \
-            --overwrite 2>/dev/null || true
-          kubectl label serviceaccount "${COLLECTOR_SA_NAME}" \
-            -n "${NAMESPACE}" \
-            app.kubernetes.io/managed-by=Helm \
-            --overwrite 2>/dev/null || true
+          kubectl annotate serviceaccount otel-collector -n "${NAMESPACE}" \
+            meta.helm.sh/release-name=otel-demo meta.helm.sh/release-namespace="${NAMESPACE}" --overwrite 2>/dev/null || true
+          kubectl label serviceaccount otel-collector -n "${NAMESPACE}" \
+            app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null || true
 
-          # Deploy original EKS app
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
           helm repo update
-          sed "s/us-east-1/${REGION}/g" scripts/helm-values-xray.yaml > /tmp/helm-values-xray-resolved.yaml
+          sed "s/us-east-1/${REGION}/g" scripts/helm-values-xray.yaml > /tmp/helm-values-xray.yaml
           helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
-            --namespace "${NAMESPACE}" \
-            --create-namespace \
-            -f /tmp/helm-values-xray-resolved.yaml \
-            --wait \
-            --timeout 10m
+            --namespace "${NAMESPACE}" --create-namespace \
+            -f /tmp/helm-values-xray.yaml --wait --timeout 10m
 
       - name: Deploy multi-platform stack
-        if: github.event.inputs.action == 'deploy'
         run: |
           chmod +x ./scripts/deploy-multi-platform.sh
-          ./scripts/deploy-multi-platform.sh \
-            --region ${{ env.REGION }} \
-            --cluster ${{ env.CLUSTER_NAME }}
-
-      - name: Destroy multi-platform stack
-        if: github.event.inputs.action == 'destroy'
-        run: |
-          chmod +x ./scripts/cleanup-multi-platform.sh
-          echo "y" | ./scripts/cleanup-multi-platform.sh \
-            --region ${{ env.REGION }} \
-            --keep-eks
+          ./scripts/deploy-multi-platform.sh --region ${{ env.REGION }} --cluster ${{ env.CLUSTER_NAME }}
 
       - name: Print access endpoints
-        if: github.event.inputs.action == 'deploy'
         run: |
           REGION="${{ env.REGION }}"
-
-          ECS_ALB=$(aws cloudformation describe-stacks \
-            --region "${REGION}" \
-            --stack-name otel-demo-ecs \
-            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
-            --output text 2>/dev/null || echo "N/A")
-
-          APIGW_URL=$(aws cloudformation describe-stacks \
-            --region "${REGION}" \
-            --stack-name otel-demo-lambda \
-            --query "Stacks[0].Outputs[?OutputKey=='ApiGatewayUrl'].OutputValue" \
-            --output text 2>/dev/null || echo "N/A")
-
-          EC2_ALB=$(aws cloudformation describe-stacks \
-            --region "${REGION}" \
-            --stack-name otel-demo-ec2 \
-            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
-            --output text 2>/dev/null || echo "N/A")
-
+          ECS_ALB=$(aws cloudformation describe-stacks --region "${REGION}" --stack-name otel-demo-ecs \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text 2>/dev/null || echo "N/A")
+          APIGW=$(aws cloudformation describe-stacks --region "${REGION}" --stack-name otel-demo-lambda \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiGatewayUrl'].OutputValue" --output text 2>/dev/null || echo "N/A")
+          EC2_ALB=$(aws cloudformation describe-stacks --region "${REGION}" --stack-name otel-demo-ec2 \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text 2>/dev/null || echo "N/A")
           echo "============================================"
-          echo "  Multi-Platform Deployment — Access Info"
+          echo "  Original EKS App:  kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080"
+          echo "  Multi-Platform App: kubectl port-forward -n otel-demo-multi svc/frontend-proxy 8081:8080"
+          echo "  ECS ALB: ${ECS_ALB}"
+          echo "  API Gateway: ${APIGW}"
+          echo "  EC2 ALB: ${EC2_ALB}"
+          echo "  X-Ray: https://${REGION}.console.aws.amazon.com/xray/home#/service-map"
           echo "============================================"
-          echo "ECS ALB (checkout, cart, product-catalog, product-reviews):"
-          echo "  ${ECS_ALB}"
-          echo ""
-          echo "API Gateway (ad, recommendation, currency, quote):"
-          echo "  ${APIGW_URL}"
-          echo ""
-          echo "EC2 ALB (payment, shipping):"
-          echo "  ${EC2_ALB}"
-          echo ""
-          echo "X-Ray Console:"
-          echo "  https://${REGION}.console.aws.amazon.com/xray/home#/service-map"
-          echo "============================================"
+
+  destroy:
+    name: destroy multi-platform demo
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    env:
+      REGION: ${{ github.event.inputs.region || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.REGION }}
+
+      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region ${{ env.REGION }} --name ${{ github.event.inputs.cluster_name }}
+
+      - name: Destroy
+        run: |
+          chmod +x ./scripts/cleanup-multi-platform.sh
+          echo "y" | ./scripts/cleanup-multi-platform.sh --region ${{ env.REGION }} --keep-eks
