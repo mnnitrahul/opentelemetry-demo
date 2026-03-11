@@ -1,24 +1,12 @@
-# =============================================================================
 # Helm Values: Multi-Platform Deployment Overrides
-# =============================================================================
-#
-# Placeholders (resolved by deploy-multi-platform.sh via envsubst):
-#   ${ECS_ALB_DNS}  — ECS ALB DNS name
-#   ${APIGW_URL}    — API Gateway base URL
-#   ${EC2_ALB_DNS}  — EC2 ALB DNS name
-# =============================================================================
+# Placeholders resolved by deploy-multi-platform.sh via envsubst:
+#   ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}
 
-# Override default env vars for all components.
-# OTEL_RESOURCE_ATTRIBUTES_EXTRA is appended to OTEL_RESOURCE_ATTRIBUTES
-# by the chart (no duplicate key issue).
 default:
   envOverrides:
     - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
       value: "service.namespace=otel-demo-multi"
 
-# Per-component overrides: rename services and redirect addresses.
-# We use 'env' (not envOverrides) to replace the chart's default env block
-# with useDefault.env=false to avoid duplicate keys.
 components:
   frontend:
     useDefault:
@@ -50,43 +38,6 @@ components:
         value: http://otel-collector:4317
       - name: OTEL_RESOURCE_ATTRIBUTES
         value: service.namespace=otel-demo-multi
-  frontend-proxy:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  load-generator:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  accounting:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  fraud-detection:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  kafka:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  flagd:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  image-provider:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  valkey-cart:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  postgresql:
-    envOverrides:
-      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-        value: "service.namespace=otel-demo-multi"
-  # --- Disable services that moved off EKS ---
   checkout:
     enabled: false
   cart:
