@@ -401,19 +401,19 @@ XRAY_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/otel-collector-xray-role"
 kubectl create namespace "${NAMESPACE}" 2>/dev/null || true
 
 # Create service account with IRSA annotation
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: otel-collector
-  namespace: ${NAMESPACE}
-  annotations:
-    eks.amazonaws.com/role-arn: ${XRAY_ROLE_ARN}
-  labels:
-    app.kubernetes.io/managed-by: Helm
-    meta.helm.sh/release-name: ${HELM_RELEASE}
-    meta.helm.sh/release-namespace: ${NAMESPACE}
-EOF
+kubectl create serviceaccount otel-collector -n "${NAMESPACE}" 2>/dev/null || true
+
+kubectl annotate serviceaccount otel-collector \
+  -n "${NAMESPACE}" \
+  eks.amazonaws.com/role-arn="${XRAY_ROLE_ARN}" \
+  meta.helm.sh/release-name="${HELM_RELEASE}" \
+  meta.helm.sh/release-namespace="${NAMESPACE}" \
+  --overwrite
+
+kubectl label serviceaccount otel-collector \
+  -n "${NAMESPACE}" \
+  app.kubernetes.io/managed-by=Helm \
+  --overwrite
 
 echo "  IRSA configured for otel-collector in ${NAMESPACE}"
 

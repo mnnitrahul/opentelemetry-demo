@@ -9,6 +9,9 @@
 name: Multi-Platform Deploy
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       action:
@@ -31,9 +34,14 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  ACTION: ${{ github.event.inputs.action || 'deploy' }}
+  REGION: ${{ github.event.inputs.region || 'us-east-1' }}
+  CLUSTER_NAME: ${{ github.event.inputs.cluster_name || 'otel-demo' }}
+
 jobs:
   multi-platform:
-    name: ${{ github.event.inputs.action }} multi-platform demo
+    name: ${{ env.ACTION }} multi-platform demo
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -43,7 +51,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ github.event.inputs.region }}
+          aws-region: ${{ env.REGION }}
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
@@ -62,8 +70,8 @@ jobs:
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
-            --region ${{ github.event.inputs.region }} \
-            --name ${{ github.event.inputs.cluster_name }}
+            --region ${{ env.REGION }} \
+            --name ${{ env.CLUSTER_NAME }}
 
       - name: Deploy original EKS app first
         if: github.event.inputs.action == 'deploy'
@@ -73,8 +81,8 @@ jobs:
           XRAY_ROLE_NAME: otel-collector-xray-role
           COLLECTOR_SA_NAME: otel-collector
         run: |
-          REGION="${{ github.event.inputs.region }}"
-          CLUSTER="${{ github.event.inputs.cluster_name }}"
+          REGION="${{ env.REGION }}"
+          CLUSTER="${{ env.CLUSTER_NAME }}"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${XRAY_POLICY_NAME}"
 
@@ -136,21 +144,21 @@ jobs:
         run: |
           chmod +x ./scripts/deploy-multi-platform.sh
           ./scripts/deploy-multi-platform.sh \
-            --region ${{ github.event.inputs.region }} \
-            --cluster ${{ github.event.inputs.cluster_name }}
+            --region ${{ env.REGION }} \
+            --cluster ${{ env.CLUSTER_NAME }}
 
       - name: Destroy multi-platform stack
         if: github.event.inputs.action == 'destroy'
         run: |
           chmod +x ./scripts/cleanup-multi-platform.sh
           echo "y" | ./scripts/cleanup-multi-platform.sh \
-            --region ${{ github.event.inputs.region }} \
+            --region ${{ env.REGION }} \
             --keep-eks
 
       - name: Print access endpoints
         if: github.event.inputs.action == 'deploy'
         run: |
-          REGION="${{ github.event.inputs.region }}"
+          REGION="${{ env.REGION }}"
 
           ECS_ALB=$(aws cloudformation describe-stacks \
             --region "${REGION}" \
