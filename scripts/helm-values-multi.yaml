@@ -41,14 +41,6 @@ opentelemetry-collector:
         traces:
           exporters: [otlp/jaeger, debug, spanmetrics, otlphttp/xray]
 
-grafana:
-  enabled: false
-jaeger:
-  enabled: false
-prometheus:
-  enabled: false
-opensearch:
-  enabled: false
 
 components:
   frontend:
