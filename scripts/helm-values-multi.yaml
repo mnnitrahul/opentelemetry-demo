@@ -189,7 +189,7 @@ components:
       - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
         value: cumulative
       - name: KAFKA_ADDR
-        value: "${MSK_BOOTSTRAP}"
+        value: kafka:9092
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
         value: http://otel-collector:4318
       - name: DB_CONNECTION_STRING
@@ -208,7 +208,7 @@ components:
       - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
         value: cumulative
       - name: KAFKA_ADDR
-        value: "${MSK_BOOTSTRAP}"
+        value: kafka:9092
       - name: FLAGD_HOST
         value: flagd
       - name: FLAGD_PORT
@@ -270,8 +270,6 @@ components:
         value: "8013"
 
   # Disabled: managed AWS services
-  kafka:
-    enabled: false
   postgresql:
     enabled: false
   valkey-cart:
