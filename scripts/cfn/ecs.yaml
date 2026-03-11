@@ -1,760 +1,164 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  OpenTelemetry Demo - ECS Platform Stack (otel-demo-ecs).
-  Runs checkout, cart, product-catalog, and product-reviews as ECS services
-  behind an internet-facing ALB with gRPC-compatible target groups.
+Description: Multi-Platform Demo - ECS order-processor service behind ALB
 
-# ---------------------------------------------------------------------------
-# Parameters
-# ---------------------------------------------------------------------------
 Parameters:
-  ApiGatewayUrl:
+  OrderProcessorImage:
+    Type: String
+    Description: ECR image URI for order-processor
+  PaymentEndpoint:
     Type: String
     Default: ''
-    Description: API Gateway base URL for Lambda services (ad, recommendation, currency, quote)
-
-  Ec2AlbDns:
+    Description: Lambda payment processor API Gateway URL
+  InventoryEndpoint:
     Type: String
     Default: ''
-    Description: EC2 ALB DNS name for EC2 services (payment, shipping)
-
-  MskBootstrapBrokers:
+    Description: EC2 inventory service ALB URL
+  OtelCollectorEndpoint:
     Type: String
     Default: ''
-    Description: MSK Serverless bootstrap brokers endpoint
+    Description: OTel Collector OTLP HTTP endpoint
 
-  EcsInstanceType:
-    Type: String
-    Default: t3.large
-    Description: EC2 instance type for ECS capacity provider
-
-  DesiredCapacity:
-    Type: Number
-    Default: 2
-    Description: Desired number of ECS container instances
-
-  MaxCapacity:
-    Type: Number
-    Default: 4
-    Description: Maximum number of ECS container instances
-
-  MinCapacity:
-    Type: Number
-    Default: 1
-    Description: Minimum number of ECS container instances
-
-  ServiceDesiredCount:
-    Type: Number
-    Default: 0
-    Description: Desired number of tasks per ECS service (set to 0 for initial deploy, scale up after wiring)
-
-  EcsOptimizedAmi:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
-    Description: ECS-optimized AMI ID (resolved from SSM parameter)
-
-  CheckoutImage:
-    Type: String
-    Default: ghcr.io/open-telemetry/demo:latest-checkoutservice
-    Description: Container image for checkout service
-
-  CartImage:
-    Type: String
-    Default: ghcr.io/open-telemetry/demo:latest-cartservice
-    Description: Container image for cart service
-
-  ProductCatalogImage:
-    Type: String
-    Default: ghcr.io/open-telemetry/demo:latest-productcatalogservice
-    Description: Container image for product-catalog service
-
-  ProductReviewsImage:
-    Type: String
-    Default: ghcr.io/open-telemetry/demo:latest-productreviewsservice
-    Description: Container image for product-reviews service
-
-# ---------------------------------------------------------------------------
-# Resources
-# ---------------------------------------------------------------------------
 Resources:
-
-  # =========================================================================
-  # ECS Cluster + ASG Capacity Provider
-  # =========================================================================
-
   EcsCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: otel-demo-ecs
+      ClusterName: otel-demo-multi-ecs
 
-  EcsClusterCapacityProviderAssociation:
-    Type: AWS::ECS::ClusterCapacityProviderAssociations
+  LogGroup:
+    Type: AWS::Logs::LogGroup
     Properties:
-      Cluster: !Ref EcsCluster
-      CapacityProviders:
-        - !Ref EcsCapacityProvider
-      DefaultCapacityProviderStrategy:
-        - CapacityProvider: !Ref EcsCapacityProvider
-          Weight: 1
+      LogGroupName: /ecs/otel-demo-multi/order-processor
+      RetentionInDays: 7
 
-  EcsCapacityProvider:
-    Type: AWS::ECS::CapacityProvider
-    Properties:
-      AutoScalingGroupProvider:
-        AutoScalingGroupArn: !Ref EcsAutoScalingGroup
-        ManagedScaling:
-          Status: ENABLED
-          TargetCapacity: 100
-        ManagedTerminationProtection: DISABLED
-
-  EcsAutoScalingGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    Properties:
-      VPCZoneIdentifier:
-        - !ImportValue OtelDemoPrivateSubnet1
-        - !ImportValue OtelDemoPrivateSubnet2
-      LaunchTemplate:
-        LaunchTemplateId: !Ref EcsLaunchTemplate
-        Version: !GetAtt EcsLaunchTemplate.LatestVersionNumber
-      MinSize: !Ref MinCapacity
-      MaxSize: !Ref MaxCapacity
-      DesiredCapacity: !Ref DesiredCapacity
-      Tags:
-        - Key: Name
-          Value: otel-demo-ecs-instance
-          PropagateAtLaunch: true
-        - Key: Project
-          Value: otel-demo
-          PropagateAtLaunch: true
-    UpdatePolicy:
-      AutoScalingRollingUpdate:
-        MinInstancesInService: 1
-
-  EcsLaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName: otel-demo-ecs-lt
-      LaunchTemplateData:
-        ImageId: !Ref EcsOptimizedAmi
-        InstanceType: !Ref EcsInstanceType
-        IamInstanceProfile:
-          Arn: !GetAtt EcsInstanceProfile.Arn
-        SecurityGroupIds:
-          - !ImportValue OtelDemoEcsTaskSG
-        UserData:
-          Fn::Base64: !Sub |
-            #!/bin/bash
-            echo ECS_CLUSTER=${EcsCluster} >> /etc/ecs/ecs.config
-
-  # IAM role for ECS container instances
-  EcsInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: otel-demo-ecs-instance-role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
-
-  EcsInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      InstanceProfileName: otel-demo-ecs-instance-profile
-      Roles:
-        - !Ref EcsInstanceRole
-
-  # =========================================================================
-  # Application Load Balancer
-  # =========================================================================
-
-  AlbSecurityGroup:
+  AlbSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security group for ECS ALB
+      GroupDescription: ALB SG for order-processor
       VpcId: !ImportValue OtelDemoVpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 5050
-          ToPort: 5050
+          FromPort: 80
+          ToPort: 80
           CidrIp: 0.0.0.0/0
-          Description: checkout gRPC
-        - IpProtocol: tcp
-          FromPort: 7070
-          ToPort: 7070
-          CidrIp: 0.0.0.0/0
-          Description: cart gRPC
-        - IpProtocol: tcp
-          FromPort: 3550
-          ToPort: 3550
-          CidrIp: 0.0.0.0/0
-          Description: product-catalog gRPC
-        - IpProtocol: tcp
-          FromPort: 3551
-          ToPort: 3551
-          CidrIp: 0.0.0.0/0
-          Description: product-reviews gRPC
-      Tags:
-        - Key: Name
-          Value: otel-demo-ecs-alb-sg
 
-  # Allow ALB to reach ECS tasks on service ports
-  EcsTaskIngressFromAlbCheckout:
+  TaskSGIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !ImportValue OtelDemoEcsTaskSG
       IpProtocol: tcp
-      FromPort: 5050
-      ToPort: 5050
-      SourceSecurityGroupId: !Ref AlbSecurityGroup
-      Description: checkout from ALB
-
-  EcsTaskIngressFromAlbCart:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !ImportValue OtelDemoEcsTaskSG
-      IpProtocol: tcp
-      FromPort: 7070
-      ToPort: 7070
-      SourceSecurityGroupId: !Ref AlbSecurityGroup
-      Description: cart from ALB
-
-  EcsTaskIngressFromAlbProductCatalog:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !ImportValue OtelDemoEcsTaskSG
-      IpProtocol: tcp
-      FromPort: 3550
-      ToPort: 3550
-      SourceSecurityGroupId: !Ref AlbSecurityGroup
-      Description: product-catalog from ALB
-
-  EcsTaskIngressFromAlbProductReviews:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !ImportValue OtelDemoEcsTaskSG
-      IpProtocol: tcp
-      FromPort: 3551
-      ToPort: 3551
-      SourceSecurityGroupId: !Ref AlbSecurityGroup
-      Description: product-reviews from ALB
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref AlbSG
 
   Alb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: otel-demo-ecs-alb
+      Name: otel-demo-multi-ecs-alb
       Scheme: internet-facing
       Type: application
       Subnets:
         - !ImportValue OtelDemoPublicSubnet1
         - !ImportValue OtelDemoPublicSubnet2
       SecurityGroups:
-        - !Ref AlbSecurityGroup
-      Tags:
-        - Key: Project
-          Value: otel-demo
+        - !Ref AlbSG
 
-  # --- Target Groups (gRPC-compatible: HTTP/2, protocol version gRPC) ---
-
-  CheckoutTargetGroup:
+  TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: otel-demo-checkout-tg
-      Port: 5050
+      Name: otel-demo-order-proc-tg
+      Port: 8080
       Protocol: HTTP
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: /
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
-      HealthCheckIntervalSeconds: 30
       Matcher:
         HttpCode: '200'
-      Tags:
-        - Key: Project
-          Value: otel-demo
 
-  CartTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: otel-demo-cart-tg
-      Port: 7070
-      Protocol: HTTP
-      VpcId: !ImportValue OtelDemoVpcId
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: /
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      HealthCheckIntervalSeconds: 30
-      Matcher:
-        HttpCode: '200'
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  ProductCatalogTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: otel-demo-prodcatalog-tg
-      Port: 3550
-      Protocol: HTTP
-      VpcId: !ImportValue OtelDemoVpcId
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: /
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      HealthCheckIntervalSeconds: 30
-      Matcher:
-        HttpCode: '200'
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  ProductReviewsTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: otel-demo-prodreviews-tg
-      Port: 3551
-      Protocol: HTTP
-      VpcId: !ImportValue OtelDemoVpcId
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: /
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      HealthCheckIntervalSeconds: 30
-      Matcher:
-        HttpCode: '200'
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  # --- ALB Listeners (one per service port) ---
-
-  CheckoutListener:
+  Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref Alb
-      Port: 5050
+      Port: 80
       Protocol: HTTP
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref CheckoutTargetGroup
+          TargetGroupArn: !Ref TargetGroup
 
-  CartListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref Alb
-      Port: 7070
-      Protocol: HTTP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref CartTargetGroup
-
-  ProductCatalogListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref Alb
-      Port: 3550
-      Protocol: HTTP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref ProductCatalogTargetGroup
-
-  ProductReviewsListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref Alb
-      Port: 3551
-      Protocol: HTTP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref ProductReviewsTargetGroup
-
-
-  # =========================================================================
-  # CloudWatch Log Groups
-  # =========================================================================
-
-  CheckoutLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/otel-demo/checkout
-      RetentionInDays: 14
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  CartLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/otel-demo/cart
-      RetentionInDays: 14
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  ProductCatalogLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/otel-demo/product-catalog
-      RetentionInDays: 14
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  ProductReviewsLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/otel-demo/product-reviews
-      RetentionInDays: 14
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  # =========================================================================
-  # Task Definitions
-  # =========================================================================
-
-  CheckoutTaskDefinition:
+  TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: otel-demo-checkout
+      Family: otel-demo-order-processor
       NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - EC2
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '256'
+      Memory: '512'
       TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
       ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
-      Cpu: '512'
-      Memory: '1024'
       ContainerDefinitions:
-        - Name: checkout
-          Image: !Ref CheckoutImage
+        - Name: order-processor
+          Image: !Ref OrderProcessorImage
           Essential: true
           PortMappings:
-            - ContainerPort: 5050
-              Protocol: tcp
+            - ContainerPort: 8080
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: !Ref CheckoutLogGroup
+              awslogs-group: !Ref LogGroup
               awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: checkout
+              awslogs-stream-prefix: ecs
           Environment:
-            - Name: CHECKOUT_SERVICE_PORT
-              Value: '5050'
+            - Name: SERVICE_PORT
+              Value: '8080'
+            - Name: OTEL_SERVICE_NAME
+              Value: multi-order-processor
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Sub https://xray.${AWS::Region}.amazonaws.com
+              Value: !Ref OtelCollectorEndpoint
             - Name: OTEL_EXPORTER_OTLP_PROTOCOL
               Value: http/protobuf
-            - Name: OTEL_SERVICE_NAME
-              Value: multi-checkout
-            - Name: OTEL_RESOURCE_ATTRIBUTES
-              Value: service.namespace=otel-demo-multi,service.instance.id=ecs-checkout
-            # ECS services via ALB
-            - Name: CART_SERVICE_ADDR
-              Value: !Sub ${Alb.DNSName}:7070
-            - Name: PRODUCT_CATALOG_SERVICE_ADDR
-              Value: !Sub ${Alb.DNSName}:3550
-            # Lambda services via API Gateway
-            - Name: CURRENCY_SERVICE_ADDR
-              Value: !Ref ApiGatewayUrl
-            # EC2 services via EC2 ALB
-            - Name: PAYMENT_SERVICE_ADDR
-              Value: !Sub ${Ec2AlbDns}:50051
-            - Name: SHIPPING_SERVICE_ADDR
-              Value: !Sub ${Ec2AlbDns}:50050
-            # AWS managed resources
             - Name: DYNAMODB_TABLE_NAME
               Value: !ImportValue OtelDemoOrdersTableName
-            - Name: SQS_QUEUE_URL
-              Value: !ImportValue OtelDemoNotificationsQueueUrl
-            - Name: KAFKA_ADDR
-              Value: !Ref MskBootstrapBrokers
+            - Name: S3_BUCKET_NAME
+              Value: !ImportValue OtelDemoAssetsBucketName
+            - Name: PAYMENT_PROCESSOR_URL
+              Value: !Ref PaymentEndpoint
+            - Name: INVENTORY_SERVICE_URL
+              Value: !Ref InventoryEndpoint
             - Name: AWS_REGION
               Value: !Ref AWS::Region
 
-  CartTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: otel-demo-cart
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - EC2
-      TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
-      ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
-      Cpu: '512'
-      Memory: '1024'
-      ContainerDefinitions:
-        - Name: cart
-          Image: !Ref CartImage
-          Essential: true
-          PortMappings:
-            - ContainerPort: 7070
-              Protocol: tcp
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref CartLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: cart
-          Environment:
-            - Name: CART_SERVICE_PORT
-              Value: '7070'
-            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Sub https://xray.${AWS::Region}.amazonaws.com
-            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
-              Value: http/protobuf
-            - Name: OTEL_SERVICE_NAME
-              Value: multi-cart
-            - Name: OTEL_RESOURCE_ATTRIBUTES
-              Value: service.namespace=otel-demo-multi,service.instance.id=ecs-cart
-            # Lambda services via API Gateway
-            - Name: CURRENCY_SERVICE_ADDR
-              Value: !Ref ApiGatewayUrl
-            - Name: VALKEY_ADDR
-              Value: !ImportValue OtelDemoValkeyEndpoint
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
-
-  ProductCatalogTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: otel-demo-product-catalog
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - EC2
-      TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
-      ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
-      Cpu: '512'
-      Memory: '1024'
-      ContainerDefinitions:
-        - Name: product-catalog
-          Image: !Ref ProductCatalogImage
-          Essential: true
-          PortMappings:
-            - ContainerPort: 3550
-              Protocol: tcp
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref ProductCatalogLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: product-catalog
-          Environment:
-            - Name: PRODUCT_CATALOG_SERVICE_PORT
-              Value: '3550'
-            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Sub https://xray.${AWS::Region}.amazonaws.com
-            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
-              Value: http/protobuf
-            - Name: OTEL_SERVICE_NAME
-              Value: multi-product-catalog
-            - Name: OTEL_RESOURCE_ATTRIBUTES
-              Value: service.namespace=otel-demo-multi,service.instance.id=ecs-product-catalog
-            - Name: DB_CONNECTION_STRING
-              Value: !ImportValue OtelDemoAuroraConnectionString
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
-
-  ProductReviewsTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: otel-demo-product-reviews
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - EC2
-      TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
-      ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
-      Cpu: '512'
-      Memory: '1024'
-      ContainerDefinitions:
-        - Name: product-reviews
-          Image: !Ref ProductReviewsImage
-          Essential: true
-          PortMappings:
-            - ContainerPort: 3551
-              Protocol: tcp
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref ProductReviewsLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: product-reviews
-          Environment:
-            - Name: PRODUCT_REVIEWS_SERVICE_PORT
-              Value: '3551'
-            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Sub https://xray.${AWS::Region}.amazonaws.com
-            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
-              Value: http/protobuf
-            - Name: OTEL_SERVICE_NAME
-              Value: multi-product-reviews
-            - Name: OTEL_RESOURCE_ATTRIBUTES
-              Value: service.namespace=otel-demo-multi,service.instance.id=ecs-product-reviews
-            # product-reviews may need to call product-catalog
-            - Name: PRODUCT_CATALOG_SERVICE_ADDR
-              Value: !Sub ${Alb.DNSName}:3550
-            - Name: DB_CONNECTION_STRING
-              Value: !ImportValue OtelDemoAuroraConnectionString
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
-
-  # =========================================================================
-  # ECS Services
-  # =========================================================================
-
-  CheckoutService:
+  Service:
     Type: AWS::ECS::Service
-    DependsOn:
-      - CheckoutListener
+    DependsOn: Listener
     Properties:
-      ServiceName: otel-demo-checkout
+      ServiceName: order-processor
       Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref CheckoutTaskDefinition
-      DesiredCount: !Ref ServiceDesiredCount
-      LaunchType: EC2
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
           Subnets:
-            - !ImportValue OtelDemoPrivateSubnet1
-            - !ImportValue OtelDemoPrivateSubnet2
+            - !ImportValue OtelDemoPublicSubnet1
+            - !ImportValue OtelDemoPublicSubnet2
           SecurityGroups:
             - !ImportValue OtelDemoEcsTaskSG
       LoadBalancers:
-        - ContainerName: checkout
-          ContainerPort: 5050
-          TargetGroupArn: !Ref CheckoutTargetGroup
-      HealthCheckGracePeriodSeconds: 120
-      Tags:
-        - Key: Project
-          Value: otel-demo
+        - ContainerName: order-processor
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
 
-  CartService:
-    Type: AWS::ECS::Service
-    DependsOn:
-      - CartListener
-    Properties:
-      ServiceName: otel-demo-cart
-      Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref CartTaskDefinition
-      DesiredCount: !Ref ServiceDesiredCount
-      LaunchType: EC2
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue OtelDemoPrivateSubnet1
-            - !ImportValue OtelDemoPrivateSubnet2
-          SecurityGroups:
-            - !ImportValue OtelDemoEcsTaskSG
-      LoadBalancers:
-        - ContainerName: cart
-          ContainerPort: 7070
-          TargetGroupArn: !Ref CartTargetGroup
-      HealthCheckGracePeriodSeconds: 120
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  ProductCatalogService:
-    Type: AWS::ECS::Service
-    DependsOn:
-      - ProductCatalogListener
-    Properties:
-      ServiceName: otel-demo-product-catalog
-      Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref ProductCatalogTaskDefinition
-      DesiredCount: !Ref ServiceDesiredCount
-      LaunchType: EC2
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue OtelDemoPrivateSubnet1
-            - !ImportValue OtelDemoPrivateSubnet2
-          SecurityGroups:
-            - !ImportValue OtelDemoEcsTaskSG
-      LoadBalancers:
-        - ContainerName: product-catalog
-          ContainerPort: 3550
-          TargetGroupArn: !Ref ProductCatalogTargetGroup
-      HealthCheckGracePeriodSeconds: 120
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-  ProductReviewsService:
-    Type: AWS::ECS::Service
-    DependsOn:
-      - ProductReviewsListener
-    Properties:
-      ServiceName: otel-demo-product-reviews
-      Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref ProductReviewsTaskDefinition
-      DesiredCount: !Ref ServiceDesiredCount
-      LaunchType: EC2
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue OtelDemoPrivateSubnet1
-            - !ImportValue OtelDemoPrivateSubnet2
-          SecurityGroups:
-            - !ImportValue OtelDemoEcsTaskSG
-      LoadBalancers:
-        - ContainerName: product-reviews
-          ContainerPort: 3551
-          TargetGroupArn: !Ref ProductReviewsTargetGroup
-      HealthCheckGracePeriodSeconds: 120
-      Tags:
-        - Key: Project
-          Value: otel-demo
-
-# ---------------------------------------------------------------------------
-# Outputs / Exports
-# ---------------------------------------------------------------------------
 Outputs:
-
-  EcsClusterName:
-    Description: ECS cluster name
-    Value: !Ref EcsCluster
-
   AlbDnsName:
-    Description: ECS ALB DNS name
+    Description: ECS ALB DNS
     Value: !GetAtt Alb.DNSName
     Export:
       Name: OtelDemoEcsAlbDns
-
-  CheckoutEndpoint:
-    Description: Checkout service endpoint (ALB DNS:port)
-    Value: !Sub ${Alb.DNSName}:5050
+  OrderProcessorEndpoint:
+    Description: Order processor URL
+    Value: !Sub http://${Alb.DNSName}/order
     Export:
-      Name: OtelDemoCheckoutEndpoint
-
-  CartEndpoint:
-    Description: Cart service endpoint (ALB DNS:port)
-    Value: !Sub ${Alb.DNSName}:7070
-    Export:
-      Name: OtelDemoCartEndpoint
-
-  ProductCatalogEndpoint:
-    Description: Product catalog service endpoint (ALB DNS:port)
-    Value: !Sub ${Alb.DNSName}:3550
-    Export:
-      Name: OtelDemoProdCatalogEndpoint
-
-  ProductReviewsEndpoint:
-    Description: Product reviews service endpoint (ALB DNS:port)
-    Value: !Sub ${Alb.DNSName}:3551
-    Export:
-      Name: OtelDemoProdReviewsEndpoint
+      Name: OtelDemoOrderProcessorEndpoint
