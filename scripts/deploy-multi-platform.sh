@@ -484,6 +484,14 @@ helm install "${HELM_RELEASE}" open-telemetry/opentelemetry-demo \
   --wait \
   --timeout 15m
 
+# Re-apply IRSA annotation (Helm install recreates the SA without it)
+echo "  Re-applying IRSA annotation after Helm install..."
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+kubectl annotate serviceaccount otel-collector -n "${NAMESPACE}" \
+  eks.amazonaws.com/role-arn="arn:aws:iam::${ACCOUNT_ID}:role/${MULTI_XRAY_ROLE}" \
+  --overwrite 2>/dev/null || true
+kubectl rollout restart daemonset/otel-collector-agent -n "${NAMESPACE}" 2>/dev/null || true
+
 # ---------------------------------------------------------------------------
 # Step 7: Scale up ECS services (were created with DesiredCount=0)
 # ---------------------------------------------------------------------------
