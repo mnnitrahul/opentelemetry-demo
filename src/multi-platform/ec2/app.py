@@ -1,7 +1,6 @@
 """
 Inventory Service - EC2/ASG Service
-HTTP service behind ALB. Reads/writes ElastiCache Redis, reads S3.
-Instrumented with OpenTelemetry for X-Ray tracing.
+Uses AWS X-Ray SDK for tracing (auto-signs with instance IAM role).
 """
 import json
 import os
@@ -10,14 +9,8 @@ import logging
 import boto3
 import redis
 from flask import Flask, request, jsonify
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-from opentelemetry.instrumentation.redis import RedisInstrumentor
+from aws_xray_sdk.core import xray_recorder, patch_all
+from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,28 +19,22 @@ SERVICE_NAME = os.environ.get('OTEL_SERVICE_NAME', 'multi-inventory-service')
 VALKEY_ADDR = os.environ.get('VALKEY_ADDR', '')
 BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', '')
 
-# Set up OpenTelemetry
-resource = Resource.create({"service.name": SERVICE_NAME, "service.namespace": "otel-demo-multi"})
-provider = TracerProvider(resource=resource)
-otlp_endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
-if otlp_endpoint:
-    exporter = OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces")
-    provider.add_span_processor(BatchSpanProcessor(exporter))
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer(SERVICE_NAME)
-
-# Instrument libraries
-BotocoreInstrumentor().instrument()
-RedisInstrumentor().instrument()
+# Configure X-Ray
+xray_recorder.configure(service=SERVICE_NAME)
+patch_all()
 
 app = Flask(__name__)
-FlaskInstrumentor().instrument_app(app)
+XRayMiddleware(app, xray_recorder)
 
 s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 redis_client = None
 if VALKEY_ADDR:
-    host, port = VALKEY_ADDR.rsplit(':', 1)
-    redis_client = redis.Redis(host=host, port=int(port), ssl=True, decode_responses=True)
+    try:
+        host, port = VALKEY_ADDR.rsplit(':', 1)
+        redis_client = redis.Redis(host=host, port=int(port), ssl=True, decode_responses=True,
+                                   socket_connect_timeout=5)
+    except Exception as e:
+        logger.warning(f"Redis connection setup failed: {e}")
 
 
 @app.route('/health')

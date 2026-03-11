@@ -1,7 +1,6 @@
 """
 Order Processor - ECS Service
-HTTP service behind ALB. Writes to DynamoDB, calls Lambda via API Gateway.
-Instrumented with OpenTelemetry for X-Ray tracing.
+Uses AWS X-Ray SDK for tracing (auto-signs with task IAM role).
 """
 import json
 import os
@@ -12,14 +11,8 @@ import logging
 import boto3
 import requests
 from flask import Flask, request, jsonify
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+from aws_xray_sdk.core import xray_recorder, patch_all
+from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,22 +23,12 @@ BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', '')
 PAYMENT_URL = os.environ.get('PAYMENT_PROCESSOR_URL', '')
 INVENTORY_URL = os.environ.get('INVENTORY_SERVICE_URL', '')
 
-# Set up OpenTelemetry
-resource = Resource.create({"service.name": SERVICE_NAME, "service.namespace": "otel-demo-multi"})
-provider = TracerProvider(resource=resource)
-otlp_endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
-if otlp_endpoint:
-    exporter = OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces")
-    provider.add_span_processor(BatchSpanProcessor(exporter))
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer(SERVICE_NAME)
-
-# Instrument libraries
-BotocoreInstrumentor().instrument()
-RequestsInstrumentor().instrument()
+# Configure X-Ray
+xray_recorder.configure(service=SERVICE_NAME)
+patch_all()
 
 app = Flask(__name__)
-FlaskInstrumentor().instrument_app(app)
+XRayMiddleware(app, xray_recorder)
 
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
