@@ -1,7 +1,7 @@
 # Helm Values: Multi-Platform Sample App
-# Deployed on a SEPARATE EKS cluster (otel-demo-multi).
-# Full observability stack (Jaeger, Grafana, Prometheus, OpenSearch).
-# Placeholders: ${AWS_REGION}
+# Separate EKS cluster (otel-demo-multi).
+# Placeholders: ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}, ${AWS_REGION},
+#               ${AURORA_CONN_STR}, ${MSK_BOOTSTRAP}, ${VALKEY_ENDPOINT}
 
 opentelemetry-collector:
   serviceAccount:
@@ -19,11 +19,7 @@ opentelemetry-collector:
           authenticator: sigv4auth
     processors:
       resourcedetection:
-        detectors:
-          - env
-          - system
-          - eks
-          - ec2
+        detectors: [env, system, eks, ec2]
     connectors:
       spanmetrics:
         dimensions:
@@ -40,26 +36,82 @@ opentelemetry-collector:
           - name: messaging.operation
           - name: messaging.destination
     service:
-      extensions:
-        - health_check
-        - sigv4auth
-        - k8s_observer
-        - k8s_leader_elector/k8s_cluster
+      extensions: [health_check, sigv4auth, k8s_observer, k8s_leader_elector/k8s_cluster]
       pipelines:
         traces:
-          exporters:
-            - otlp/jaeger
-            - debug
-            - spanmetrics
-            - otlphttp/xray
+          exporters: [otlp/jaeger, debug, spanmetrics, otlphttp/xray]
 
 default:
   envOverrides:
     - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
       value: "service.namespace=otel-demo-multi"
 
-# Disable services that run on ECS/Lambda/EC2
 components:
+  # --- EKS services with multi- prefix and managed service endpoints ---
+  frontend:
+    useDefault:
+      env: false
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: multi-frontend
+      - name: FRONTEND_PORT
+        value: "8080"
+      - name: FRONTEND_ADDR
+        value: :8080
+      - name: AD_ADDR
+        value: "http://${APIGW_URL}/ad"
+      - name: CART_ADDR
+        value: "${ECS_ALB_DNS}:7070"
+      - name: CHECKOUT_ADDR
+        value: "${ECS_ALB_DNS}:5050"
+      - name: CURRENCY_ADDR
+        value: "http://${APIGW_URL}/currency"
+      - name: PRODUCT_CATALOG_ADDR
+        value: "${ECS_ALB_DNS}:3550"
+      - name: PRODUCT_REVIEWS_ADDR
+        value: "${ECS_ALB_DNS}:3551"
+      - name: RECOMMENDATION_ADDR
+        value: "http://${APIGW_URL}/recommendation"
+      - name: SHIPPING_ADDR
+        value: "http://${EC2_ALB_DNS}:50050"
+      - name: PAYMENT_ADDR
+        value: "${EC2_ALB_DNS}:50051"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector:4317
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: service.namespace=otel-demo-multi
+      - name: WEB_OTEL_SERVICE_NAME
+        value: multi-frontend-web
+      - name: OTEL_COLLECTOR_HOST
+        value: otel-collector
+      - name: PUBLIC_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: http://localhost:8080/otlp-http/v1/traces
+      - name: FLAGD_HOST
+        value: flagd
+      - name: FLAGD_PORT
+        value: "8013"
+
+  accounting:
+    envOverrides:
+      - name: KAFKA_ADDR
+        value: "${MSK_BOOTSTRAP}"
+      - name: DB_CONNECTION_STRING
+        value: "${AURORA_CONN_STR}"
+
+  fraud-detection:
+    envOverrides:
+      - name: KAFKA_ADDR
+        value: "${MSK_BOOTSTRAP}"
+
+  # --- Disabled: moved to managed AWS services ---
+  kafka:
+    enabled: false
+  postgresql:
+    enabled: false
+  valkey-cart:
+    enabled: false
+
+  # --- Disabled: moved to ECS/Lambda/EC2 ---
   checkout:
     enabled: false
   cart:
