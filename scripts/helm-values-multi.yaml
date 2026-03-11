@@ -10,6 +10,8 @@ opentelemetry-collector:
   serviceAccount:
     create: false
     name: otel-collector
+  clusterRole:
+    create: false
   config:
     extensions:
       sigv4auth:
