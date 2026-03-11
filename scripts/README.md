@@ -174,3 +174,85 @@ API Gateway, etc. without needing policy updates.
 - [ ] Split services across ECS, Lambda, API Gateway for a hybrid architecture
 - [ ] Add CloudWatch Logs OTLP endpoint for logs export
 - [ ] Set up CloudWatch alarms based on OTel metrics
+
+## Troubleshooting: Multi-Platform Deployment
+
+### CloudFormation stack stuck in ROLLBACK_COMPLETE or ROLLBACK_FAILED
+
+The deploy script auto-detects these states and deletes the stack before
+recreating. If it doesn't, manually delete:
+
+```bash
+aws cloudformation delete-stack --stack-name <stack-name> --region us-east-1
+aws cloudformation wait stack-delete-complete --stack-name <stack-name> --region us-east-1
+```
+
+### Lambda "does not have permission to access the ECR image"
+
+Lambda container images must come from ECR (not ghcr.io). The deploy script
+mirrors images from ghcr.io to ECR and sets a repo policy allowing Lambda
+to pull. If this fails:
+
+1. Check the deploy logs for "Warning: could not set repo policy" messages
+2. Manually set the policy on each ECR repo:
+
+```bash
+for svc in adservice recommendationservice currencyservice quoteservice emailservice; do
+  aws ecr set-repository-policy \
+    --repository-name "otel-demo/${svc}" \
+    --region us-east-1 \
+    --policy-text '{"Version":"2012-10-17","Statement":[{"Sid":"LambdaECRPull","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"]}]}'
+done
+```
+
+3. The Lambda execution role also needs `AmazonEC2ContainerRegistryReadOnly`
+   managed policy (already added to the shared CFN stack).
+
+### Lambda layers not supported with container images
+
+Lambda container images cannot use layers (like the ADOT Lambda layer).
+OTel instrumentation must be baked into the container image. The demo
+images already include OTel SDKs, so spans are generated without the
+ADOT layer. X-Ray active tracing (`TracingConfig: Active`) provides
+AWS-vended traces automatically.
+
+### ECS tasks crash-looping (VALKEY_ADDR, DB_CONNECTION_STRING, KAFKA_ADDR)
+
+ECS services are deployed with `DesiredCount: 0` initially. The deploy
+script scales them up after all infrastructure is ready. If tasks crash
+after scaling:
+
+- **cart**: Needs `VALKEY_ADDR` pointing to ElastiCache Serverless.
+  ElastiCache Serverless requires TLS — the connection string must use
+  `ssl=true` or the `rediss://` scheme.
+- **product-catalog / product-reviews**: Need `DB_CONNECTION_STRING`
+  pointing to Aurora Serverless v2. No TLS issues — plain connections work.
+- **checkout**: Needs `KAFKA_ADDR` pointing to MSK Serverless bootstrap
+  brokers. MSK Serverless requires TLS + IAM auth — the Kafka client
+  must be configured for SASL/IAM authentication.
+
+### IAM permission errors during CloudFormation deployment
+
+The GitHub Actions IAM role needs broad permissions for CloudFormation
+to create resources. If you see "not authorized to perform" errors:
+
+1. Check which action is missing in the error message
+2. Add it to `scripts/setup-iam-oidc.sh`
+3. Re-run: `./scripts/setup-iam-oidc.sh mnnitrahul/opentelemetry-demo`
+4. Push and re-trigger the workflow
+
+Current wildcard permissions: `s3:*`, `sqs:*`, `dynamodb:*`, `logs:*`,
+`elasticache:*`, `rds:*`, `kafka:*`, `kafka-cluster:*`.
+
+### ALB target group protocol version errors
+
+- `GRPC` and `HTTP2` protocol versions require HTTPS listeners (TLS certs)
+- For plain HTTP listeners, omit `ProtocolVersion` (defaults to HTTP1)
+- The demo uses HTTP1 target groups since we don't have TLS certificates
+
+### service.name collision between EKS-only and multi-platform deployments
+
+All multi-platform services use `multi-` prefixed `OTEL_SERVICE_NAME`
+(e.g., `multi-checkout`, `multi-frontend`) and `service.namespace=otel-demo-multi`.
+The original EKS-only deployment uses unprefixed names. Both can send
+traces to the same X-Ray account without collision.
