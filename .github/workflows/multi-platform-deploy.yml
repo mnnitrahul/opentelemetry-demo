@@ -84,7 +84,7 @@ jobs:
             kubectl annotate "${resource}" \
               meta.helm.sh/release-name=otel-demo \
               meta.helm.sh/release-namespace="${NAMESPACE}" \
-              --overwrite 2>/dev/null || true
+              --overwrite --field-manager=helm 2>/dev/null || true
           done
 
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
@@ -92,8 +92,7 @@ jobs:
           sed "s/us-east-1/${REGION}/g" scripts/helm-values-xray.yaml > /tmp/helm-values-xray.yaml
           helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
             --namespace "${NAMESPACE}" --create-namespace \
-            -f /tmp/helm-values-xray.yaml --wait --timeout 10m \
-            --force
+            -f /tmp/helm-values-xray.yaml --wait --timeout 10m
 
       - name: Deploy multi-platform app (separate cluster + CFN stacks)
         run: |
