@@ -14,7 +14,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REGION="us-east-1"
 CLUSTER_NAME="otel-demo"
-MULTI_CLUSTER="otel-demo-multi"
+MULTI_CLUSTER="${CLUSTER_NAME}-multi"
 NAMESPACE="otel-demo"
 HELM_RELEASE="otel-demo-multi"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,6 +46,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cluster)
       CLUSTER_NAME="$2"
+      MULTI_CLUSTER="${CLUSTER_NAME}-multi"
       shift 2
       ;;
     *)
