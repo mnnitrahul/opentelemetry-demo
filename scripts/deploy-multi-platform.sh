@@ -193,6 +193,10 @@ deploy_stack() {
     aws cloudformation delete-stack --region "${REGION}" --stack-name "${stack_name}"
     aws cloudformation wait stack-delete-complete --region "${REGION}" --stack-name "${stack_name}"
     echo "  Deleted."
+  elif [[ "${current_status}" == "DELETE_IN_PROGRESS" ]]; then
+    echo "  Stack is in DELETE_IN_PROGRESS. Waiting for deletion to complete..."
+    aws cloudformation wait stack-delete-complete --region "${REGION}" --stack-name "${stack_name}"
+    echo "  Deleted."
   fi
 
   echo ""
