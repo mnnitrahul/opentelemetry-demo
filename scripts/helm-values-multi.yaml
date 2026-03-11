@@ -93,6 +93,8 @@ components:
 
   accounting:
     envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-accounting
       - name: KAFKA_ADDR
         value: "${MSK_BOOTSTRAP}"
       - name: DB_CONNECTION_STRING
@@ -100,7 +102,35 @@ components:
 
   fraud-detection:
     envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-fraud-detection
       - name: KAFKA_ADDR
+        value: "${MSK_BOOTSTRAP}"
+
+  frontend-proxy:
+    envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-frontend-proxy
+
+  load-generator:
+    envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-load-generator
+
+  flagd:
+    envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-flagd
+
+  image-provider:
+    envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-image-provider
+
+  llm:
+    envOverrides:
+      - name: OTEL_SERVICE_NAME
+        value: multi-llm
         value: "${MSK_BOOTSTRAP}"
 
   # --- Disabled: moved to managed AWS services ---
