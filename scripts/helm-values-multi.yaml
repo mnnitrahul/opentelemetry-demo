@@ -2,107 +2,90 @@
 # Helm Values: Multi-Platform Deployment Overrides
 # =============================================================================
 #
-# This file extends helm-values-xray.yaml to redirect EKS service traffic
-# to external platform endpoints and disable services that moved off EKS.
-#
-# Usage:
-#   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
-#     -f helm-values-xray.yaml \
-#     -f helm-values-multi.yaml
-#
 # Placeholders (resolved by deploy-multi-platform.sh via envsubst):
-#   ${ECS_ALB_DNS}  — ECS ALB DNS name (checkout, cart, product-catalog, product-reviews)
-#   ${APIGW_URL}    — API Gateway base URL (ad, recommendation, currency, quote)
-#   ${EC2_ALB_DNS}  — EC2 ALB DNS name (payment, shipping)
+#   ${ECS_ALB_DNS}  — ECS ALB DNS name
+#   ${APIGW_URL}    — API Gateway base URL
+#   ${EC2_ALB_DNS}  — EC2 ALB DNS name
 # =============================================================================
 
-# Override service addresses to point at external platforms
+# Override default env vars for all components.
+# OTEL_RESOURCE_ATTRIBUTES_EXTRA is appended to OTEL_RESOURCE_ATTRIBUTES
+# by the chart (no duplicate key issue).
 default:
   envOverrides:
-    - name: CART_ADDR
-      value: "${ECS_ALB_DNS}:7070"
-    - name: CHECKOUT_ADDR
-      value: "${ECS_ALB_DNS}:5050"
-    - name: PRODUCT_CATALOG_ADDR
-      value: "${ECS_ALB_DNS}:3550"
-    - name: PRODUCT_REVIEWS_ADDR
-      value: "${ECS_ALB_DNS}:3551"
-    - name: AD_ADDR
-      value: "http://${APIGW_URL}/ad"
-    - name: CURRENCY_ADDR
-      value: "http://${APIGW_URL}/currency"
-    - name: RECOMMENDATION_ADDR
-      value: "http://${APIGW_URL}/recommendation"
-    - name: QUOTE_ADDR
-      value: "http://${APIGW_URL}/quote"
-    - name: PAYMENT_ADDR
-      value: "${EC2_ALB_DNS}:50051"
-    - name: SHIPPING_ADDR
-      value: "http://${EC2_ALB_DNS}:50050"
+    - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+      value: "service.namespace=otel-demo-multi"
 
-# Prefix 'multi-' on all EKS service names so this deployment's traces
-# don't collide with the original EKS-only sample app in X-Ray.
+# Per-component overrides: rename services and redirect addresses.
+# We use 'env' (not envOverrides) to replace the chart's default env block
+# with useDefault.env=false to avoid duplicate keys.
 components:
   frontend:
-    envOverrides:
+    useDefault:
+      env: false
+    env:
       - name: OTEL_SERVICE_NAME
         value: multi-frontend
+      - name: FRONTEND_PORT
+        value: "8080"
+      - name: FRONTEND_ADDR
+        value: :8080
+      - name: AD_ADDR
+        value: "http://${APIGW_URL}/ad"
+      - name: CART_ADDR
+        value: "${ECS_ALB_DNS}:7070"
+      - name: CHECKOUT_ADDR
+        value: "${ECS_ALB_DNS}:5050"
+      - name: CURRENCY_ADDR
+        value: "http://${APIGW_URL}/currency"
+      - name: PRODUCT_CATALOG_ADDR
+        value: "${ECS_ALB_DNS}:3550"
+      - name: PRODUCT_REVIEWS_ADDR
+        value: "${ECS_ALB_DNS}:3551"
+      - name: RECOMMENDATION_ADDR
+        value: "http://${APIGW_URL}/recommendation"
+      - name: SHIPPING_ADDR
+        value: "http://${EC2_ALB_DNS}:50050"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector:4317
       - name: OTEL_RESOURCE_ATTRIBUTES
         value: service.namespace=otel-demo-multi
   frontend-proxy:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-frontend-proxy
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   load-generator:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-load-generator
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   accounting:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-accounting
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   fraud-detection:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-fraud-detection
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   kafka:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-kafka
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   flagd:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-flagd
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   image-provider:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-image-provider
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   valkey-cart:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-valkey-cart
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   postgresql:
     envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-postgresql
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
+      - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
+        value: "service.namespace=otel-demo-multi"
   # --- Disable services that moved off EKS ---
   checkout:
     enabled: false
