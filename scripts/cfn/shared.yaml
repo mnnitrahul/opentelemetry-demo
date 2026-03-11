@@ -303,6 +303,13 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                 Resource: !GetAtt NotificationsQueue.Arn
+              - Sid: DynamoDBWrite
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt OrdersTable.Arn
               - Sid: XRayTracing
                 Effect: Allow
                 Action:
