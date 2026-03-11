@@ -395,7 +395,13 @@ echo "[6/7] Running helm upgrade..."
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
 helm repo update
 
-helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+# Uninstall first to avoid duplicate env key conflicts from envOverrides
+# (server-side apply rejects duplicate keys when patching existing deployments)
+helm uninstall otel-demo --namespace "${NAMESPACE}" 2>/dev/null || true
+echo "  Waiting for old resources to clean up..."
+sleep 10
+
+helm install otel-demo open-telemetry/opentelemetry-demo \
   --namespace "${NAMESPACE}" \
   --create-namespace \
   -f "${SCRIPT_DIR}/helm-values-xray.yaml" \
