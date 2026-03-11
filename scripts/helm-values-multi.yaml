@@ -8,36 +8,6 @@ default:
       value: "service.namespace=otel-demo-multi"
 
 components:
-  frontend:
-    useDefault:
-      env: false
-    env:
-      - name: OTEL_SERVICE_NAME
-        value: multi-frontend
-      - name: FRONTEND_PORT
-        value: "8080"
-      - name: FRONTEND_ADDR
-        value: :8080
-      - name: AD_ADDR
-        value: "http://${APIGW_URL}/ad"
-      - name: CART_ADDR
-        value: "${ECS_ALB_DNS}:7070"
-      - name: CHECKOUT_ADDR
-        value: "${ECS_ALB_DNS}:5050"
-      - name: CURRENCY_ADDR
-        value: "http://${APIGW_URL}/currency"
-      - name: PRODUCT_CATALOG_ADDR
-        value: "${ECS_ALB_DNS}:3550"
-      - name: PRODUCT_REVIEWS_ADDR
-        value: "${ECS_ALB_DNS}:3551"
-      - name: RECOMMENDATION_ADDR
-        value: "http://${APIGW_URL}/recommendation"
-      - name: SHIPPING_ADDR
-        value: "http://${EC2_ALB_DNS}:50050"
-      - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://otel-collector:4317
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: service.namespace=otel-demo-multi
   checkout:
     enabled: false
   cart:
