@@ -93,8 +93,8 @@ Resources:
       Family: otel-demo-order-processor
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '512'
+      Memory: '1024'
       TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
       ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
       ContainerDefinitions:
@@ -124,6 +124,18 @@ Resources:
               Value: !Ref InventoryEndpoint
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+        - Name: xray-daemon
+          Image: public.ecr.aws/xray/aws-xray-daemon:latest
+          Essential: false
+          PortMappings:
+            - ContainerPort: 2000
+              Protocol: udp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: xray
 
   Service:
     Type: AWS::ECS::Service
