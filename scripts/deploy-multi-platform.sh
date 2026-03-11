@@ -442,7 +442,7 @@ helm upgrade --install "${HELM_RELEASE}" open-telemetry/opentelemetry-demo \
   --namespace "${NAMESPACE}" \
   -f "${HELM_VALUES_RESOLVED}" \
   --wait \
-  --timeout 10m
+  --timeout 15m
 
 # ---------------------------------------------------------------------------
 # Step 7: Scale up ECS services (were created with DesiredCount=0)
