@@ -3,9 +3,9 @@
 # Runs alongside the original EKS-only app without interference.
 #
 # Placeholders resolved by deploy-multi-platform.sh via envsubst:
-#   ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}
+#   ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}, ${AWS_REGION}
 
-# Collector IRSA — uses the same X-Ray role but separate SA in new namespace
+# Collector config with X-Ray export
 opentelemetry-collector:
   serviceAccount:
     create: false
@@ -56,14 +56,25 @@ opentelemetry-collector:
             - spanmetrics
             - otlphttp/xray
 
-# All services get multi- prefix and otel-demo-multi namespace
+# All EKS services get otel-demo-multi namespace tag
 default:
   envOverrides:
     - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
       value: "service.namespace=otel-demo-multi"
 
+# Disable observability backends (shared from original EKS app)
+# and services that moved to other platforms
+grafana:
+  enabled: false
+jaeger:
+  enabled: false
+prometheus:
+  enabled: false
+opensearch:
+  enabled: false
+
 components:
-  # Services that moved to other platforms — disable on EKS
+  # Services on other platforms — disabled on EKS
   checkout:
     enabled: false
   cart:
