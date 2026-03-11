@@ -406,8 +406,11 @@ export AWS_REGION="${REGION}"
 
 # Managed service endpoints from shared stack
 export AURORA_CONN_STR=$(get_stack_output "${SHARED_STACK}" "AuroraConnectionString")
-export MSK_BOOTSTRAP=$(get_stack_output "${SHARED_STACK}" "MskBootstrapBrokers")
 export VALKEY_ENDPOINT=$(get_stack_output "${SHARED_STACK}" "ValkeyEndpoint")
+
+# MSK_BOOTSTRAP was already resolved via API in step 4
+# (get_stack_output returns the ARN, not the brokers)
+export MSK_BOOTSTRAP
 
 echo "  Aurora:  ${AURORA_CONN_STR:0:40}..."
 echo "  MSK:     ${MSK_BOOTSTRAP}"
