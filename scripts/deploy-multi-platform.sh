@@ -294,131 +294,17 @@ deploy_stack "${SHARED_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${SHARED_STACK}]}" 
   "PublicSubnet2=${PUBLIC_SUBNET_2}" \
   "EksClusterSG=${EKS_SG}"
 
-# --- ECS stack (depends on shared) ---
-# Resolve MSK bootstrap brokers (not available as CFN attribute)
-MSK_CLUSTER_ARN=$(get_stack_output "${SHARED_STACK}" "MskClusterArn")
-MSK_BOOTSTRAP=""
-if [[ -n "${MSK_CLUSTER_ARN}" && "${MSK_CLUSTER_ARN}" != "None" ]]; then
-  echo "  Resolving MSK bootstrap brokers..."
-  MSK_BOOTSTRAP=$(aws kafka get-bootstrap-brokers \
-    --region "${REGION}" \
-    --cluster-arn "${MSK_CLUSTER_ARN}" \
-    --query 'BootstrapBrokerStringSaslIam' \
-    --output text 2>/dev/null || echo "")
-  echo "  MSK Bootstrap: ${MSK_BOOTSTRAP}"
-fi
-
-deploy_stack "${ECS_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${ECS_STACK}]}" \
-  "MskBootstrapBrokers=${MSK_BOOTSTRAP}"
-
-# --- Mirror Lambda images from ghcr.io to ECR (Lambda only supports ECR) ---
+# --- ECS, Lambda, EC2 stacks are deployed by deploy-multi-services.sh ---
 echo ""
-echo "  Mirroring Lambda images to ECR..."
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
-
-# Login to ECR
-aws ecr get-login-password --region "${REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}" 2>/dev/null
-
-LAMBDA_SERVICES=("adservice" "recommendationservice" "currencyservice" "quoteservice" "emailservice")
-declare -A ECR_IMAGES
-
-for svc in "${LAMBDA_SERVICES[@]}"; do
-  REPO_NAME="otel-demo/${svc}"
-  GHCR_IMAGE="ghcr.io/open-telemetry/demo:latest-${svc}"
-  ECR_IMAGE="${ECR_REGISTRY}/${REPO_NAME}:latest"
-
-  # Create ECR repo if not exists
-  if ! aws ecr describe-repositories --repository-names "${REPO_NAME}" --region "${REGION}" > /dev/null 2>&1; then
-    echo "  Creating ECR repo: ${REPO_NAME}"
-    aws ecr create-repository --repository-name "${REPO_NAME}" --region "${REGION}" --no-cli-pager > /dev/null
-  fi
-
-  # Set ECR repo policy to allow Lambda to pull
-  aws ecr set-repository-policy \
-    --repository-name "${REPO_NAME}" \
-    --region "${REGION}" \
-    --policy-text '{"Version":"2012-10-17","Statement":[{"Sid":"LambdaECRPull","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"]}]}' \
-    > /dev/null 2>&1 || echo "  Warning: could not set repo policy on ${REPO_NAME}"
-
-  # Check if image already exists in ECR — skip pull/push if so
-  if aws ecr describe-images --repository-name "${REPO_NAME}" --region "${REGION}" \
-    --image-ids imageTag=latest > /dev/null 2>&1; then
-    echo "  ${REPO_NAME}:latest already in ECR, skipping."
-    ECR_IMAGES["${svc}"]="${ECR_IMAGE}"
-    continue
-  fi
-
-  echo "  Pulling ${GHCR_IMAGE}..."
-  if ! docker pull "${GHCR_IMAGE}" 2>&1; then
-    echo "  ERROR: Failed to pull ${GHCR_IMAGE}"
-    exit 1
-  fi
-  docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
-  echo "  Pushing to ${ECR_IMAGE}..."
-  if ! docker push "${ECR_IMAGE}" 2>&1; then
-    echo "  ERROR: Failed to push ${ECR_IMAGE}"
-    exit 1
-  fi
-
-  ECR_IMAGES["${svc}"]="${ECR_IMAGE}"
-done
-
-# --- Lambda stack (depends on shared) ---
-deploy_stack "${LAMBDA_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${LAMBDA_STACK}]}" \
-  "AdImage=${ECR_IMAGES[adservice]}" \
-  "RecommendationImage=${ECR_IMAGES[recommendationservice]}" \
-  "CurrencyImage=${ECR_IMAGES[currencyservice]}" \
-  "QuoteImage=${ECR_IMAGES[quoteservice]}" \
-  "EmailImage=${ECR_IMAGES[emailservice]}"
-
-# --- EC2 stack (depends on shared) ---
-deploy_stack "${EC2_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${EC2_STACK}]}"
-
-echo ""
-echo "All CloudFormation stacks deployed successfully."
+echo "Shared stack deployed. ECS/Lambda/EC2 will be deployed by deploy-multi-services.sh."
 
 # ---------------------------------------------------------------------------
-# Step 4: Resolve endpoints from stack outputs
+# Step 5: Generate Helm values
 # ---------------------------------------------------------------------------
 echo ""
-echo "[5/8] Resolving endpoints from stack outputs..."
+echo "[5/8] Generating Helm values..."
 
-ECS_ALB_DNS=$(get_stack_output "${ECS_STACK}" "AlbDnsName")
-APIGW_URL=$(get_stack_output "${LAMBDA_STACK}" "ApiGatewayUrl")
-EC2_ALB_DNS=$(get_stack_output "${EC2_STACK}" "AlbDnsName")
-
-# Strip trailing slash and protocol from API Gateway URL if present
-APIGW_URL="${APIGW_URL%/}"
-APIGW_URL="${APIGW_URL#https://}"
-APIGW_URL="${APIGW_URL#http://}"
-
-echo "  ECS ALB DNS:     ${ECS_ALB_DNS}"
-echo "  API Gateway URL: ${APIGW_URL}"
-echo "  EC2 ALB DNS:     ${EC2_ALB_DNS}"
-
-# ---------------------------------------------------------------------------
-# Step 5: Generate updated Helm values via envsubst
-# ---------------------------------------------------------------------------
-echo ""
-echo "[5/8] Generating Helm values with resolved endpoints..."
-
-export ECS_ALB_DNS
-export APIGW_URL
-export EC2_ALB_DNS
 export AWS_REGION="${REGION}"
-
-# Managed service endpoints from shared stack
-export AURORA_CONN_STR=$(get_stack_output "${SHARED_STACK}" "AuroraConnectionString")
-export VALKEY_ENDPOINT=$(get_stack_output "${SHARED_STACK}" "ValkeyEndpoint")
-
-# MSK_BOOTSTRAP was already resolved via API in step 4
-# (get_stack_output returns the ARN, not the brokers)
-export MSK_BOOTSTRAP
-
-echo "  Aurora:  ${AURORA_CONN_STR:0:40}..."
-echo "  MSK:     ${MSK_BOOTSTRAP}"
-echo "  Valkey:  ${VALKEY_ENDPOINT}"
 
 HELM_VALUES_TEMPLATE="${SCRIPT_DIR}/helm-values-multi.yaml"
 HELM_VALUES_RESOLVED="/tmp/helm-values-multi-resolved.yaml"
@@ -496,42 +382,15 @@ kubectl annotate serviceaccount otel-collector -n "${NAMESPACE}" \
   --overwrite 2>/dev/null || true
 kubectl rollout restart daemonset/otel-collector-agent -n "${NAMESPACE}" 2>/dev/null || true
 
-# ---------------------------------------------------------------------------
-# Step 7: Scale up ECS services (were created with DesiredCount=0)
-# ---------------------------------------------------------------------------
-echo ""
-echo "[7/7] Scaling up ECS services..."
-
-ECS_CLUSTER_NAME="otel-demo-ecs"
-for svc in otel-demo-checkout otel-demo-cart otel-demo-product-catalog otel-demo-product-reviews; do
-  echo "  Scaling ${svc} to 2 tasks..."
-  aws ecs update-service \
-    --region "${REGION}" \
-    --cluster "${ECS_CLUSTER_NAME}" \
-    --service "${svc}" \
-    --desired-count 2 \
-    --no-cli-pager > /dev/null 2>&1 || echo "  Warning: could not scale ${svc}"
-done
-
-echo "  ECS services scaled up. Tasks will start shortly."
-
 echo ""
 echo "============================================"
-echo " Multi-Platform Deployment Complete!"
+echo " Multi-Platform EKS Deployment Complete!"
 echo "============================================"
 echo ""
-echo "Two apps running:"
+echo "  EKS services deployed on cluster: ${MULTI_CLUSTER}"
+echo "  Namespace: ${NAMESPACE}"
+echo "  Port-forward: kubectl port-forward -n ${NAMESPACE} svc/frontend-proxy 8081:8080"
 echo ""
-echo "  1. Original EKS App (namespace: otel-demo)"
-echo "     kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080"
+echo "  X-Ray: https://${REGION}.console.aws.amazon.com/xray/home?region=${REGION}#/service-map"
 echo ""
-echo "  2. Multi-Platform App (namespace: ${NAMESPACE})"
-echo "     EKS services: kubectl port-forward -n ${NAMESPACE} svc/frontend-proxy 8081:8080"
-echo "     ECS ALB: http://${ECS_ALB_DNS}"
-echo "     API Gateway: https://${APIGW_URL}"
-echo "     EC2 ALB: http://${EC2_ALB_DNS}"
-echo ""
-echo "  X-Ray Service Map:"
-echo "    https://${REGION}.console.aws.amazon.com/xray/home?region=${REGION}#/service-map"
-echo ""
-echo "To tear down multi-platform only: ./scripts/cleanup-multi-platform.sh --region ${REGION}"
+echo "  Next: deploy-multi-services.sh deploys ECS/Lambda/EC2 services."
