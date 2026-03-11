@@ -14,7 +14,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REGION="us-east-1"
 CLUSTER_NAME="otel-demo"
-NAMESPACE="otel-demo-multi"
+MULTI_CLUSTER="otel-demo-multi"
+NAMESPACE="otel-demo"
 HELM_RELEASE="otel-demo-multi"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFN_DIR="${SCRIPT_DIR}/cfn"
@@ -57,16 +58,16 @@ done
 
 echo "============================================"
 echo " Multi-Platform Deploy"
-echo " Region:  ${REGION}"
-echo " Cluster: ${CLUSTER_NAME}"
+echo " Region:       ${REGION}"
+echo " EKS Cluster:  ${MULTI_CLUSTER}"
 echo "============================================"
 
 # ---------------------------------------------------------------------------
 # Step 1: Validate prerequisites
 # ---------------------------------------------------------------------------
 echo ""
-echo "[1/6] Checking prerequisites..."
-for cmd in aws kubectl helm; do
+echo "[1/8] Checking prerequisites..."
+for cmd in aws kubectl helm eksctl; do
   if ! command -v "$cmd" &> /dev/null; then
     echo "ERROR: '${cmd}' is not installed. Please install it first."
     exit 1
@@ -75,13 +76,34 @@ done
 echo "All prerequisites found."
 
 # ---------------------------------------------------------------------------
-# Step 2: Discover EKS VPC networking
+# Step 2: Create separate EKS cluster for multi-platform app
 # ---------------------------------------------------------------------------
 echo ""
-echo "[2/6] Discovering EKS VPC networking..."
+echo "[2/8] Creating EKS cluster '${MULTI_CLUSTER}' (skip if exists)..."
+
+if aws eks describe-cluster --name "${MULTI_CLUSTER}" --region "${REGION}" &>/dev/null; then
+  echo "  Cluster '${MULTI_CLUSTER}' already exists. Skipping creation."
+else
+  echo "  Creating cluster (this takes ~15 minutes)..."
+  eksctl create cluster \
+    --name "${MULTI_CLUSTER}" \
+    --region "${REGION}" \
+    --nodes 3 \
+    --node-type m5.xlarge \
+    --with-oidc \
+    --managed
+fi
+
+aws eks update-kubeconfig --name "${MULTI_CLUSTER}" --region "${REGION}"
+
+# ---------------------------------------------------------------------------
+# Step 3: Discover EKS VPC networking
+# ---------------------------------------------------------------------------
+echo ""
+echo "[3/8] Discovering EKS VPC networking..."
 
 CLUSTER_INFO=$(aws eks describe-cluster \
-  --name "${CLUSTER_NAME}" \
+  --name "${MULTI_CLUSTER}" \
   --region "${REGION}" \
   --query 'cluster.resourcesVpcConfig' \
   --output json)
@@ -256,7 +278,7 @@ get_stack_output() {
 #         shared → ecs → lambda → ec2
 # ---------------------------------------------------------------------------
 echo ""
-echo "[3/6] Deploying CloudFormation stacks..."
+echo "[4/8] Deploying CloudFormation stacks..."
 
 # --- Shared stack ---
 deploy_stack "${SHARED_STACK}" "${CFN_DIR}/${STACK_TEMPLATES[${SHARED_STACK}]}" \
@@ -355,7 +377,7 @@ echo "All CloudFormation stacks deployed successfully."
 # Step 4: Resolve endpoints from stack outputs
 # ---------------------------------------------------------------------------
 echo ""
-echo "[4/6] Resolving endpoints from stack outputs..."
+echo "[5/8] Resolving endpoints from stack outputs..."
 
 ECS_ALB_DNS=$(get_stack_output "${ECS_STACK}" "AlbDnsName")
 APIGW_URL=$(get_stack_output "${LAMBDA_STACK}" "ApiGatewayUrl")
@@ -374,7 +396,7 @@ echo "  EC2 ALB DNS:     ${EC2_ALB_DNS}"
 # Step 5: Generate updated Helm values via envsubst
 # ---------------------------------------------------------------------------
 echo ""
-echo "[5/7] Generating Helm values with resolved endpoints..."
+echo "[5/8] Generating Helm values with resolved endpoints..."
 
 export ECS_ALB_DNS
 export APIGW_URL
@@ -389,51 +411,51 @@ envsubst < "${HELM_VALUES_TEMPLATE}" > "${HELM_VALUES_RESOLVED}"
 echo "  Resolved values written to ${HELM_VALUES_RESOLVED}"
 
 # ---------------------------------------------------------------------------
-# Step 6: Set up IRSA for otel-collector in the multi namespace
+# Step 6: Set up IRSA for otel-collector on the multi cluster
 # ---------------------------------------------------------------------------
 echo ""
-echo "[6/7] Setting up IRSA for ${NAMESPACE}..."
+echo "[6/8] Setting up IRSA for ${NAMESPACE} on ${MULTI_CLUSTER}..."
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-XRAY_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/otel-collector-xray-role"
+XRAY_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/otel-collector-xray-policy"
 
-# Create namespace if not exists
-kubectl create namespace "${NAMESPACE}" 2>/dev/null || true
+# Create X-Ray IAM policy if not exists
+if ! aws iam get-policy --policy-arn "${XRAY_POLICY_ARN}" &>/dev/null; then
+  XRAY_POLICY_ARN=$(aws iam create-policy --policy-name otel-collector-xray-policy \
+    --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets"],"Resource":"*"}]}' \
+    --query 'Policy.Arn' --output text)
+fi
 
-# Create service account with IRSA annotation
-kubectl create serviceaccount otel-collector -n "${NAMESPACE}" 2>/dev/null || true
+# Create IRSA — uses a different role name to avoid conflict with original cluster
+MULTI_XRAY_ROLE="otel-collector-xray-role-multi"
+eksctl create iamserviceaccount \
+  --name otel-collector \
+  --namespace "${NAMESPACE}" \
+  --cluster "${MULTI_CLUSTER}" \
+  --region "${REGION}" \
+  --attach-policy-arn "${XRAY_POLICY_ARN}" \
+  --role-name "${MULTI_XRAY_ROLE}" \
+  --approve \
+  --override-existing-serviceaccounts || true
 
+# Adopt SA for Helm
 kubectl annotate serviceaccount otel-collector \
   -n "${NAMESPACE}" \
-  eks.amazonaws.com/role-arn="${XRAY_ROLE_ARN}" \
   meta.helm.sh/release-name="${HELM_RELEASE}" \
   meta.helm.sh/release-namespace="${NAMESPACE}" \
-  --overwrite
-
+  --overwrite 2>/dev/null || true
 kubectl label serviceaccount otel-collector \
   -n "${NAMESPACE}" \
   app.kubernetes.io/managed-by=Helm \
-  --overwrite
+  --overwrite 2>/dev/null || true
 
 echo "  IRSA configured for otel-collector in ${NAMESPACE}"
-
-# Relabel cluster-scoped resources to allow the multi release to adopt them
-echo "  Relabeling cluster-scoped resources for multi release..."
-for resource in clusterrole/otel-collector clusterrolebinding/otel-collector; do
-  kubectl annotate "${resource}" \
-    meta.helm.sh/release-name="${HELM_RELEASE}" \
-    meta.helm.sh/release-namespace="${NAMESPACE}" \
-    --overwrite 2>/dev/null || true
-  kubectl label "${resource}" \
-    app.kubernetes.io/managed-by=Helm \
-    --overwrite 2>/dev/null || true
-done
 
 # ---------------------------------------------------------------------------
 # Step 7: Helm install multi-platform release
 # ---------------------------------------------------------------------------
 echo ""
-echo "[7/7] Installing Helm release ${HELM_RELEASE} in ${NAMESPACE}..."
+echo "[7/8] Installing Helm release ${HELM_RELEASE} in ${NAMESPACE}..."
 
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
 helm repo update

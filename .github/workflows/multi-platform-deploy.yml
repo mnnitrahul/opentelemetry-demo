@@ -21,7 +21,7 @@ on:
         required: true
         default: "us-east-1"
       cluster_name:
-        description: "EKS cluster name"
+        description: "Original EKS cluster name"
         required: true
         default: "otel-demo"
 
@@ -30,8 +30,8 @@ permissions:
   contents: read
 
 jobs:
-  multi-platform:
-    name: deploy multi-platform demo
+  deploy:
+    name: deploy both apps
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
     env:
@@ -54,9 +54,6 @@ jobs:
           curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
           tar -xzf eksctl_*.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --region ${{ env.REGION }} --name ${{ env.CLUSTER_NAME }}
-
       - name: Deploy original EKS app
         run: |
           REGION="${{ env.REGION }}"
@@ -70,6 +67,8 @@ jobs:
               --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets"],"Resource":"*"}]}' \
               --query 'Policy.Arn' --output text)
           fi
+
+          aws eks update-kubeconfig --name "${CLUSTER}" --region "${REGION}"
 
           eksctl create iamserviceaccount --name otel-collector --namespace "${NAMESPACE}" \
             --cluster "${CLUSTER}" --region "${REGION}" --attach-policy-arn "${POLICY_ARN}" \
@@ -87,7 +86,7 @@ jobs:
             --namespace "${NAMESPACE}" --create-namespace \
             -f /tmp/helm-values-xray.yaml --wait --timeout 10m
 
-      - name: Deploy multi-platform stack
+      - name: Deploy multi-platform app (separate cluster + CFN stacks)
         run: |
           chmod +x ./scripts/deploy-multi-platform.sh
           ./scripts/deploy-multi-platform.sh --region ${{ env.REGION }} --cluster ${{ env.CLUSTER_NAME }}
@@ -102,16 +101,18 @@ jobs:
           EC2_ALB=$(aws cloudformation describe-stacks --region "${REGION}" --stack-name otel-demo-ec2 \
             --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text 2>/dev/null || echo "N/A")
           echo "============================================"
-          echo "  Original EKS App:  kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080"
-          echo "  Multi-Platform App: kubectl port-forward -n otel-demo-multi svc/frontend-proxy 8081:8080"
-          echo "  ECS ALB: ${ECS_ALB}"
-          echo "  API Gateway: ${APIGW}"
-          echo "  EC2 ALB: ${EC2_ALB}"
+          echo "  1. Original EKS App (cluster: otel-demo)"
+          echo "     kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080"
+          echo ""
+          echo "  2. Multi-Platform App (cluster: otel-demo-multi)"
+          echo "     kubectl port-forward -n otel-demo svc/frontend-proxy 8081:8080"
+          echo "     ECS: ${ECS_ALB} | APIGW: ${APIGW} | EC2: ${EC2_ALB}"
+          echo ""
           echo "  X-Ray: https://${REGION}.console.aws.amazon.com/xray/home#/service-map"
           echo "============================================"
 
   destroy:
-    name: destroy multi-platform demo
+    name: destroy multi-platform
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
     env:
@@ -128,10 +129,12 @@ jobs:
       - uses: azure/setup-kubectl@v4
       - uses: azure/setup-helm@v4
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --region ${{ env.REGION }} --name ${{ github.event.inputs.cluster_name }}
+      - name: Install eksctl
+        run: |
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
+          tar -xzf eksctl_*.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
 
       - name: Destroy
         run: |
           chmod +x ./scripts/cleanup-multi-platform.sh
-          echo "y" | ./scripts/cleanup-multi-platform.sh --region ${{ env.REGION }} --keep-eks
+          echo "y" | ./scripts/cleanup-multi-platform.sh --region ${{ env.REGION }}

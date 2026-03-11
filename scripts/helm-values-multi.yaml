@@ -1,13 +1,12 @@
 # Helm Values: Multi-Platform Sample App
-# Separate Helm release in namespace otel-demo-multi.
-# Placeholders: ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}, ${AWS_REGION}
+# Deployed on a SEPARATE EKS cluster (otel-demo-multi).
+# Full observability stack (Jaeger, Grafana, Prometheus, OpenSearch).
+# Placeholders: ${AWS_REGION}
 
 opentelemetry-collector:
   serviceAccount:
     create: false
     name: otel-collector
-  clusterRole:
-    create: false
   config:
     extensions:
       sigv4auth:
@@ -30,17 +29,26 @@ opentelemetry-collector:
         dimensions:
           - name: peer.service
           - name: server.address
+          - name: net.peer.name
           - name: db.system
           - name: messaging.system
+          - name: http.route
           - name: rpc.service
           - name: rpc.method
+          - name: db.operation
+          - name: db.name
+          - name: messaging.operation
+          - name: messaging.destination
     service:
       extensions:
         - health_check
         - sigv4auth
+        - k8s_observer
+        - k8s_leader_elector/k8s_cluster
       pipelines:
         traces:
           exporters:
+            - otlp/jaeger
             - debug
             - spanmetrics
             - otlphttp/xray
@@ -50,15 +58,7 @@ default:
     - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
       value: "service.namespace=otel-demo-multi"
 
-grafana:
-  enabled: false
-jaeger:
-  enabled: false
-prometheus:
-  enabled: false
-opensearch:
-  enabled: false
-
+# Disable services that run on ECS/Lambda/EC2
 components:
   checkout:
     enabled: false
