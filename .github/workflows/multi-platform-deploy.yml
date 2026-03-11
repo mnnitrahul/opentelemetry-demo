@@ -48,6 +48,14 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
 
+      - name: Install eksctl
+        run: |
+          ARCH=amd64
+          PLATFORM=$(uname -s)_$ARCH
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+          tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin
+
       - name: Install Helm
         uses: azure/setup-helm@v4
 
@@ -56,6 +64,72 @@ jobs:
           aws eks update-kubeconfig \
             --region ${{ github.event.inputs.region }} \
             --name ${{ github.event.inputs.cluster_name }}
+
+      - name: Deploy original EKS app first
+        if: github.event.inputs.action == 'deploy'
+        env:
+          NAMESPACE: otel-demo
+          XRAY_POLICY_NAME: otel-collector-xray-policy
+          XRAY_ROLE_NAME: otel-collector-xray-role
+          COLLECTOR_SA_NAME: otel-collector
+        run: |
+          REGION="${{ github.event.inputs.region }}"
+          CLUSTER="${{ github.event.inputs.cluster_name }}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${XRAY_POLICY_NAME}"
+
+          # Create IAM policy if not exists
+          if ! aws iam get-policy --policy-arn "${POLICY_ARN}" &> /dev/null; then
+            POLICY_ARN=$(aws iam create-policy \
+              --policy-name "${XRAY_POLICY_NAME}" \
+              --policy-document '{
+                "Version": "2012-10-17",
+                "Statement": [{
+                  "Effect": "Allow",
+                  "Action": [
+                    "xray:PutTraceSegments",
+                    "xray:PutTelemetryRecords",
+                    "xray:GetSamplingRules",
+                    "xray:GetSamplingTargets"
+                  ],
+                  "Resource": "*"
+                }]
+              }' \
+              --query 'Policy.Arn' --output text)
+          fi
+
+          # Create IRSA for otel-collector in otel-demo namespace
+          eksctl create iamserviceaccount \
+            --name "${COLLECTOR_SA_NAME}" \
+            --namespace "${NAMESPACE}" \
+            --cluster "${CLUSTER}" \
+            --region "${REGION}" \
+            --attach-policy-arn "${POLICY_ARN}" \
+            --role-name "${XRAY_ROLE_NAME}" \
+            --approve \
+            --override-existing-serviceaccounts || true
+
+          # Adopt SA for Helm
+          kubectl annotate serviceaccount "${COLLECTOR_SA_NAME}" \
+            -n "${NAMESPACE}" \
+            meta.helm.sh/release-name=otel-demo \
+            meta.helm.sh/release-namespace="${NAMESPACE}" \
+            --overwrite 2>/dev/null || true
+          kubectl label serviceaccount "${COLLECTOR_SA_NAME}" \
+            -n "${NAMESPACE}" \
+            app.kubernetes.io/managed-by=Helm \
+            --overwrite 2>/dev/null || true
+
+          # Deploy original EKS app
+          helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          helm repo update
+          sed "s/us-east-1/${REGION}/g" scripts/helm-values-xray.yaml > /tmp/helm-values-xray-resolved.yaml
+          helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            -f /tmp/helm-values-xray-resolved.yaml \
+            --wait \
+            --timeout 10m
 
       - name: Deploy multi-platform stack
         if: github.event.inputs.action == 'deploy'

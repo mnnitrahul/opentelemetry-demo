@@ -14,7 +14,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REGION="us-east-1"
 CLUSTER_NAME="otel-demo"
-NAMESPACE="otel-demo"
+NAMESPACE="otel-demo-multi"
+HELM_RELEASE="otel-demo-multi"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFN_DIR="${SCRIPT_DIR}/cfn"
 
@@ -373,11 +374,12 @@ echo "  EC2 ALB DNS:     ${EC2_ALB_DNS}"
 # Step 5: Generate updated Helm values via envsubst
 # ---------------------------------------------------------------------------
 echo ""
-echo "[5/6] Generating Helm values with resolved endpoints..."
+echo "[5/7] Generating Helm values with resolved endpoints..."
 
 export ECS_ALB_DNS
 export APIGW_URL
 export EC2_ALB_DNS
+export AWS_REGION="${REGION}"
 
 HELM_VALUES_TEMPLATE="${SCRIPT_DIR}/helm-values-multi.yaml"
 HELM_VALUES_RESOLVED="/tmp/helm-values-multi-resolved.yaml"
@@ -387,24 +389,45 @@ envsubst < "${HELM_VALUES_TEMPLATE}" > "${HELM_VALUES_RESOLVED}"
 echo "  Resolved values written to ${HELM_VALUES_RESOLVED}"
 
 # ---------------------------------------------------------------------------
-# Step 6: Helm upgrade with updated values
+# Step 6: Set up IRSA for otel-collector in the multi namespace
 # ---------------------------------------------------------------------------
 echo ""
-echo "[6/7] Running helm upgrade..."
+echo "[6/7] Setting up IRSA for ${NAMESPACE}..."
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+XRAY_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/otel-collector-xray-role"
+
+# Create namespace if not exists
+kubectl create namespace "${NAMESPACE}" 2>/dev/null || true
+
+# Create service account with IRSA annotation
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: ${NAMESPACE}
+  annotations:
+    eks.amazonaws.com/role-arn: ${XRAY_ROLE_ARN}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    meta.helm.sh/release-name: ${HELM_RELEASE}
+    meta.helm.sh/release-namespace: ${NAMESPACE}
+EOF
+
+echo "  IRSA configured for otel-collector in ${NAMESPACE}"
+
+# ---------------------------------------------------------------------------
+# Step 7: Helm install multi-platform release
+# ---------------------------------------------------------------------------
+echo ""
+echo "[7/7] Installing Helm release ${HELM_RELEASE} in ${NAMESPACE}..."
 
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
 helm repo update
 
-# Uninstall first to avoid duplicate env key conflicts from envOverrides
-# (server-side apply rejects duplicate keys when patching existing deployments)
-helm uninstall otel-demo --namespace "${NAMESPACE}" 2>/dev/null || true
-echo "  Waiting for old resources to clean up..."
-sleep 10
-
-helm install otel-demo open-telemetry/opentelemetry-demo \
+helm upgrade --install "${HELM_RELEASE}" open-telemetry/opentelemetry-demo \
   --namespace "${NAMESPACE}" \
-  --create-namespace \
-  -f "${SCRIPT_DIR}/helm-values-xray.yaml" \
   -f "${HELM_VALUES_RESOLVED}" \
   --wait \
   --timeout 10m
@@ -433,21 +456,18 @@ echo "============================================"
 echo " Multi-Platform Deployment Complete!"
 echo "============================================"
 echo ""
-echo "Access Information:"
-echo "  ECS ALB (checkout, cart, product-catalog, product-reviews):"
-echo "    http://${ECS_ALB_DNS}"
+echo "Two apps running:"
 echo ""
-echo "  API Gateway (ad, recommendation, currency, quote):"
-echo "    https://${APIGW_URL}"
+echo "  1. Original EKS App (namespace: otel-demo)"
+echo "     kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080"
 echo ""
-echo "  EC2 ALB (payment, shipping):"
-echo "    http://${EC2_ALB_DNS}"
-echo ""
-echo "  EKS Frontend:"
-echo "    kubectl port-forward -n ${NAMESPACE} svc/otel-demo-frontend-proxy 8080:8080"
-echo "    Then open http://localhost:8080"
+echo "  2. Multi-Platform App (namespace: ${NAMESPACE})"
+echo "     EKS services: kubectl port-forward -n ${NAMESPACE} svc/frontend-proxy 8081:8080"
+echo "     ECS ALB: http://${ECS_ALB_DNS}"
+echo "     API Gateway: https://${APIGW_URL}"
+echo "     EC2 ALB: http://${EC2_ALB_DNS}"
 echo ""
 echo "  X-Ray Service Map:"
 echo "    https://${REGION}.console.aws.amazon.com/xray/home?region=${REGION}#/service-map"
 echo ""
-echo "To tear down: ./scripts/cleanup-multi-platform.sh --region ${REGION}"
+echo "To tear down multi-platform only: ./scripts/cleanup-multi-platform.sh --region ${REGION}"

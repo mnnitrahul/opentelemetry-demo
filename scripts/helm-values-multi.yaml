@@ -1,13 +1,88 @@
-# Helm Values: Multi-Platform Deployment
-# This file is layered on top of helm-values-xray.yaml.
-# It does NOT disable or modify any EKS services.
-# The multi-platform services (ECS/Lambda/EC2) run independently
-# alongside the EKS app as a separate sample application.
+# Helm Values: Multi-Platform Sample App
+# Deploys as a SEPARATE Helm release (otel-demo-multi) in namespace otel-demo-multi.
+# Runs alongside the original EKS-only app without interference.
 #
-# The only change is adding service.namespace=otel-demo-multi
-# to distinguish EKS services in X-Ray when both apps run together.
+# Placeholders resolved by deploy-multi-platform.sh via envsubst:
+#   ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}
 
+# Collector IRSA — uses the same X-Ray role but separate SA in new namespace
+opentelemetry-collector:
+  serviceAccount:
+    create: false
+    name: otel-collector
+  config:
+    extensions:
+      sigv4auth:
+        region: ${AWS_REGION}
+        service: xray
+    exporters:
+      otlphttp/xray:
+        endpoint: https://xray.${AWS_REGION}.amazonaws.com
+        auth:
+          authenticator: sigv4auth
+    processors:
+      resourcedetection:
+        detectors:
+          - env
+          - system
+          - eks
+          - ec2
+    connectors:
+      spanmetrics:
+        dimensions:
+          - name: peer.service
+          - name: server.address
+          - name: net.peer.name
+          - name: db.system
+          - name: messaging.system
+          - name: http.route
+          - name: rpc.service
+          - name: rpc.method
+          - name: db.operation
+          - name: db.name
+          - name: messaging.operation
+          - name: messaging.destination
+    service:
+      extensions:
+        - health_check
+        - sigv4auth
+        - k8s_observer
+        - k8s_leader_elector/k8s_cluster
+      pipelines:
+        traces:
+          exporters:
+            - otlp/jaeger
+            - debug
+            - spanmetrics
+            - otlphttp/xray
+
+# All services get multi- prefix and otel-demo-multi namespace
 default:
   envOverrides:
     - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
       value: "service.namespace=otel-demo-multi"
+
+components:
+  # Services that moved to other platforms — disable on EKS
+  checkout:
+    enabled: false
+  cart:
+    enabled: false
+  product-catalog:
+    enabled: false
+  product-reviews:
+    enabled: false
+  ad:
+    enabled: false
+  recommendation:
+    enabled: false
+  currency:
+    enabled: false
+  quote:
+    enabled: false
+  email:
+    enabled: false
+  payment:
+    enabled: false
+  shipping:
+    enabled: false
