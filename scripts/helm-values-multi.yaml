@@ -1,32 +1,13 @@
-# Helm Values: Multi-Platform Deployment Overrides
-# Placeholders resolved by deploy-multi-platform.sh via envsubst:
-#   ${ECS_ALB_DNS}, ${APIGW_URL}, ${EC2_ALB_DNS}
+# Helm Values: Multi-Platform Deployment
+# This file is layered on top of helm-values-xray.yaml.
+# It does NOT disable or modify any EKS services.
+# The multi-platform services (ECS/Lambda/EC2) run independently
+# alongside the EKS app as a separate sample application.
+#
+# The only change is adding service.namespace=otel-demo-multi
+# to distinguish EKS services in X-Ray when both apps run together.
 
 default:
   envOverrides:
     - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
       value: "service.namespace=otel-demo-multi"
-
-components:
-  checkout:
-    enabled: false
-  cart:
-    enabled: false
-  product-catalog:
-    enabled: false
-  product-reviews:
-    enabled: false
-  ad:
-    enabled: false
-  recommendation:
-    enabled: false
-  currency:
-    enabled: false
-  quote:
-    enabled: false
-  email:
-    enabled: false
-  payment:
-    enabled: false
-  shipping:
-    enabled: false
