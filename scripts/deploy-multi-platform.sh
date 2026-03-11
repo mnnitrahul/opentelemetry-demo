@@ -470,8 +470,13 @@ echo "[7/8] Installing Helm release ${HELM_RELEASE} in ${NAMESPACE}..."
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
 helm repo update
 
-helm upgrade --install "${HELM_RELEASE}" open-telemetry/opentelemetry-demo \
+# Uninstall first to avoid duplicate env key conflicts on upgrade
+helm uninstall "${HELM_RELEASE}" --namespace "${NAMESPACE}" 2>/dev/null || true
+sleep 5
+
+helm install "${HELM_RELEASE}" open-telemetry/opentelemetry-demo \
   --namespace "${NAMESPACE}" \
+  --create-namespace \
   -f "${HELM_VALUES_RESOLVED}" \
   --wait \
   --timeout 15m
