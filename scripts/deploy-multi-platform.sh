@@ -417,6 +417,18 @@ kubectl label serviceaccount otel-collector \
 
 echo "  IRSA configured for otel-collector in ${NAMESPACE}"
 
+# Relabel cluster-scoped resources to allow the multi release to adopt them
+echo "  Relabeling cluster-scoped resources for multi release..."
+for resource in clusterrole/otel-collector clusterrolebinding/otel-collector; do
+  kubectl annotate "${resource}" \
+    meta.helm.sh/release-name="${HELM_RELEASE}" \
+    meta.helm.sh/release-namespace="${NAMESPACE}" \
+    --overwrite 2>/dev/null || true
+  kubectl label "${resource}" \
+    app.kubernetes.io/managed-by=Helm \
+    --overwrite 2>/dev/null || true
+done
+
 # ---------------------------------------------------------------------------
 # Step 7: Helm install multi-platform release
 # ---------------------------------------------------------------------------
