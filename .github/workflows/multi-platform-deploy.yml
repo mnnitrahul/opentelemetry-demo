@@ -99,6 +99,12 @@ jobs:
           chmod +x ./scripts/deploy-multi-platform.sh
           ./scripts/deploy-multi-platform.sh --region ${{ env.REGION }} --cluster ${{ env.CLUSTER_NAME }}
 
+      - name: Deploy multi-platform services (ECS, Lambda, EC2)
+        run: |
+          pip install boto3 aws-xray-sdk --quiet
+          chmod +x ./scripts/deploy-multi-services.sh
+          ./scripts/deploy-multi-services.sh --region ${{ env.REGION }}
+
       - name: Print access endpoints
         run: |
           REGION="${{ env.REGION }}"
