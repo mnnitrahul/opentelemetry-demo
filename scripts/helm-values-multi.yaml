@@ -41,19 +41,26 @@ opentelemetry-collector:
         traces:
           exporters: [otlp/jaeger, debug, spanmetrics, otlphttp/xray]
 
-default:
-  envOverrides:
-    - name: OTEL_RESOURCE_ATTRIBUTES_EXTRA
-      value: "service.namespace=otel-demo-multi"
+grafana:
+  enabled: false
+jaeger:
+  enabled: false
+prometheus:
+  enabled: false
+opensearch:
+  enabled: false
 
 components:
-  # --- EKS services with multi- prefix and managed service endpoints ---
   frontend:
     useDefault:
       env: false
     env:
       - name: OTEL_SERVICE_NAME
         value: multi-frontend
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
       - name: FRONTEND_PORT
         value: "8080"
       - name: FRONTEND_ADDR
@@ -91,57 +98,193 @@ components:
       - name: FLAGD_PORT
         value: "8013"
 
-  accounting:
-    envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-accounting
-      - name: KAFKA_ADDR
-        value: "${MSK_BOOTSTRAP}"
-      - name: DB_CONNECTION_STRING
-        value: "${AURORA_CONN_STR}"
-
-  fraud-detection:
-    envOverrides:
-      - name: OTEL_SERVICE_NAME
-        value: multi-fraud-detection
-      - name: KAFKA_ADDR
-        value: "${MSK_BOOTSTRAP}"
-
   frontend-proxy:
-    envOverrides:
+    useDefault:
+      env: false
+    env:
       - name: OTEL_SERVICE_NAME
         value: multi-frontend-proxy
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: ENVOY_PORT
+        value: "8080"
+      - name: ENVOY_ADDR
+        value: 0.0.0.0
+      - name: ENVOY_ADMIN_PORT
+        value: "10000"
+      - name: FLAGD_HOST
+        value: flagd
+      - name: FLAGD_PORT
+        value: "8013"
+      - name: FLAGD_UI_HOST
+        value: flagd
+      - name: FLAGD_UI_PORT
+        value: "4000"
+      - name: FRONTEND_HOST
+        value: frontend
+      - name: FRONTEND_PORT
+        value: "8080"
+      - name: GRAFANA_HOST
+        value: grafana
+      - name: GRAFANA_PORT
+        value: "80"
+      - name: IMAGE_PROVIDER_HOST
+        value: image-provider
+      - name: IMAGE_PROVIDER_PORT
+        value: "8081"
+      - name: JAEGER_HOST
+        value: jaeger
+      - name: JAEGER_UI_PORT
+        value: "16686"
+      - name: LOCUST_WEB_HOST
+        value: load-generator
+      - name: LOCUST_WEB_PORT
+        value: "8089"
+      - name: OTEL_COLLECTOR_HOST
+        value: otel-collector
+      - name: OTEL_COLLECTOR_PORT_GRPC
+        value: "4317"
+      - name: OTEL_COLLECTOR_PORT_HTTP
+        value: "4318"
 
   load-generator:
-    envOverrides:
+    useDefault:
+      env: false
+    env:
       - name: OTEL_SERVICE_NAME
         value: multi-load-generator
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: LOCUST_WEB_HOST
+        value: 0.0.0.0
+      - name: LOCUST_WEB_PORT
+        value: "8089"
+      - name: LOCUST_USERS
+        value: "10"
+      - name: LOCUST_SPAWN_RATE
+        value: "1"
+      - name: LOCUST_HOST
+        value: http://frontend-proxy:8080
+      - name: LOCUST_HEADLESS
+        value: "false"
+      - name: LOCUST_AUTOSTART
+        value: "true"
+      - name: LOCUST_BROWSER_TRAFFIC_ENABLED
+        value: "true"
+      - name: PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION
+        value: python
+      - name: FLAGD_HOST
+        value: flagd
+      - name: FLAGD_PORT
+        value: "8013"
+      - name: FLAGD_OFREP_PORT
+        value: "8016"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector:4317
+
+  accounting:
+    useDefault:
+      env: false
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: multi-accounting
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: KAFKA_ADDR
+        value: "${MSK_BOOTSTRAP}"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector:4318
+      - name: DB_CONNECTION_STRING
+        value: "${AURORA_CONN_STR}"
+      - name: OTEL_DOTNET_AUTO_TRACES_ENTITYFRAMEWORKCORE_INSTRUMENTATION_ENABLED
+        value: "false"
+
+  fraud-detection:
+    useDefault:
+      env: false
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: multi-fraud-detection
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: KAFKA_ADDR
+        value: "${MSK_BOOTSTRAP}"
+      - name: FLAGD_HOST
+        value: flagd
+      - name: FLAGD_PORT
+        value: "8013"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector:4318
+      - name: OTEL_INSTRUMENTATION_KAFKA_EXPERIMENTAL_SPAN_ATTRIBUTES
+        value: "true"
+      - name: OTEL_INSTRUMENTATION_MESSAGING_EXPERIMENTAL_RECEIVE_TELEMETRY_ENABLED
+        value: "true"
 
   flagd:
-    envOverrides:
+    useDefault:
+      env: false
+    env:
       - name: OTEL_SERVICE_NAME
         value: multi-flagd
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: FLAGD_METRICS_EXPORTER
+        value: otel
+      - name: FLAGD_OTEL_COLLECTOR_URI
+        value: otel-collector:4317
+      - name: GOMEMLIMIT
+        value: 60MiB
 
   image-provider:
-    envOverrides:
+    useDefault:
+      env: false
+    env:
       - name: OTEL_SERVICE_NAME
         value: multi-image-provider
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: IMAGE_PROVIDER_PORT
+        value: "8081"
+      - name: OTEL_COLLECTOR_PORT_GRPC
+        value: "4317"
+      - name: OTEL_COLLECTOR_HOST
+        value: otel-collector
 
   llm:
-    envOverrides:
+    useDefault:
+      env: false
+    env:
       - name: OTEL_SERVICE_NAME
         value: multi-llm
-        value: "${MSK_BOOTSTRAP}"
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-collector
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: FLAGD_HOST
+        value: flagd
+      - name: FLAGD_PORT
+        value: "8013"
 
-  # --- Disabled: moved to managed AWS services ---
+  # Disabled: managed AWS services
   kafka:
     enabled: false
   postgresql:
     enabled: false
   valkey-cart:
     enabled: false
-
-  # --- Disabled: moved to ECS/Lambda/EC2 ---
+  # Disabled: ECS/Lambda/EC2
   checkout:
     enabled: false
   cart:
