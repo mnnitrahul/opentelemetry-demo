@@ -203,6 +203,8 @@ spec:
           value: multi-platform-caller
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: http://otel-collector:4317
+        - name: OTEL_PROPAGATORS
+          value: xray,tracecontext,baggage
         - name: ECS_ORDER_URL
           value: http://${ECS_ALB}/order
         - name: LAMBDA_PAYMENT_URL
