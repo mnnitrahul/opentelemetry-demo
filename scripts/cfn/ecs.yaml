@@ -157,6 +157,16 @@ Resources:
               Value: !ImportValue OtelDemoOrderStreamName
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: PG_HOST
+              Value: !ImportValue OtelDemoAuroraEndpoint
+            - Name: PG_PORT
+              Value: !ImportValue OtelDemoAuroraPort
+            - Name: PG_USER
+              Value: otelu
+            - Name: PG_PASSWORD
+              Value: otelpassword123
+            - Name: PG_DATABASE
+              Value: otel
         - Name: otel-collector
           Image: otel/opentelemetry-collector-contrib:latest
           Essential: false

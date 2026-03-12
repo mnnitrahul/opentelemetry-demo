@@ -9,6 +9,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.instrumentation.kafka import KafkaInstrumentor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +25,16 @@ SQS_QUEUE_URL = os.environ.get('SQS_QUEUE_URL', '')
 KINESIS_STREAM = os.environ.get('KINESIS_STREAM_NAME', '')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
+# Aurora PostgreSQL
+PG_HOST = os.environ.get('PG_HOST', '')
+PG_PORT = os.environ.get('PG_PORT', '5432')
+PG_USER = os.environ.get('PG_USER', 'otelu')
+PG_PASSWORD = os.environ.get('PG_PASSWORD', 'otelpassword123')
+PG_DATABASE = os.environ.get('PG_DATABASE', 'otel')
+
+# MSK Serverless (Kafka with IAM auth)
+MSK_BOOTSTRAP = os.environ.get('MSK_BOOTSTRAP', '')
+
 resource = Resource.create({"service.name": SERVICE_NAME, "service.namespace": "otel-demo-multi"})
 provider = TracerProvider(resource=resource)
 exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
@@ -32,6 +44,8 @@ tracer = trace.get_tracer(SERVICE_NAME)
 
 BotocoreInstrumentor().instrument()
 RequestsInstrumentor().instrument()
+Psycopg2Instrumentor().instrument()
+KafkaInstrumentor().instrument()
 
 app = Flask(__name__)
 FlaskInstrumentor().instrument_app(app)
@@ -41,6 +55,59 @@ sns = boto3.client('sns', region_name=REGION)
 sqs = boto3.client('sqs', region_name=REGION)
 kinesis = boto3.client('kinesis', region_name=REGION)
 s3_client = boto3.client('s3', region_name=REGION)
+
+# Aurora PostgreSQL connection
+pg_conn = None
+if PG_HOST:
+    try:
+        import psycopg2
+        pg_conn = psycopg2.connect(
+            host=PG_HOST, port=int(PG_PORT),
+            user=PG_USER, password=PG_PASSWORD,
+            dbname=PG_DATABASE, sslmode='require',
+            connect_timeout=5
+        )
+        pg_conn.autocommit = True
+        with pg_conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS orders (
+                    order_id VARCHAR(255) PRIMARY KEY,
+                    status VARCHAR(50),
+                    platform VARCHAR(50),
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+        logger.info(f"Aurora PostgreSQL connected: {PG_HOST}")
+    except Exception as e:
+        logger.warning(f"Aurora PostgreSQL setup failed: {e}")
+        pg_conn = None
+
+# MSK Kafka producer (IAM auth)
+kafka_producer = None
+if MSK_BOOTSTRAP:
+    try:
+        from kafka import KafkaProducer
+        from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
+
+        class MSKTokenProvider:
+            def token(self):
+                token, _ = MSKAuthTokenProvider.generate_auth_token(REGION)
+                return token
+
+        tp = MSKTokenProvider()
+        kafka_producer = KafkaProducer(
+            bootstrap_servers=MSK_BOOTSTRAP,
+            security_protocol='SASL_SSL',
+            sasl_mechanism='OAUTHBEARER',
+            sasl_oauth_token_provider=tp,
+            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+            request_timeout_ms=10000,
+            api_version_auto_timeout_ms=10000,
+        )
+        logger.info(f"MSK Kafka connected: {MSK_BOOTSTRAP}")
+    except Exception as e:
+        logger.warning(f"MSK Kafka setup failed: {e}")
+        kafka_producer = None
 
 @app.route('/health')
 @app.route('/')
@@ -107,6 +174,27 @@ def create_order():
             steps.append("kinesis: put record")
         except Exception as e:
             steps.append(f"kinesis: {e}")
+
+    # Aurora PostgreSQL
+    if pg_conn:
+        try:
+            with pg_conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO orders (order_id, status, platform) VALUES (%s, %s, %s) ON CONFLICT (order_id) DO NOTHING",
+                    (order_id, "CREATED", "ecs")
+                )
+            steps.append("aurora: order inserted")
+        except Exception as e:
+            steps.append(f"aurora: {e}")
+
+    # MSK Kafka
+    if kafka_producer:
+        try:
+            kafka_producer.send('otel-demo-orders', value=order_data)
+            kafka_producer.flush(timeout=5)
+            steps.append("msk: message sent")
+        except Exception as e:
+            steps.append(f"msk: {e}")
 
     return jsonify({"orderId": order_id, "platform": "ecs", "steps": steps})
 

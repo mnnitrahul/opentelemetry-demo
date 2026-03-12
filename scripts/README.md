@@ -141,15 +141,15 @@ All use ADOT Python layer + X-Ray SDK for Application Signals.
 | SQS | otel-demo-order-queue | ECS -> Lambda sqs-consumer | Order queue |
 | Kinesis | otel-demo-order-stream | ECS -> Lambda kinesis-consumer | Order stream |
 | ElastiCache | otel-demo-valkey | ECS inventory-service | Cache (TLS required) |
-| Aurora | otel-demo-postgres | EKS product-catalog/reviews | Database (in-cluster pg used) |
-| MSK | otel-demo-kafka | ECS order-processor (optional) | Kafka (in-cluster used by EKS) |
+| Aurora | otel-demo-postgres | ECS order-processor, EKS product-catalog/reviews | Order records (PostgreSQL) |
+| MSK | otel-demo-kafka | ECS order-processor | Order event streaming (Kafka IAM auth) |
 
 ### IAM Roles
 
 | Role | Used By | Permissions |
 |------|---------|-------------|
 | github-actions-otel-demo | GitHub Actions OIDC | Full deployment (EKS, ECS, Lambda, CFN, ECR, S3, SNS, SQS, etc.) |
-| otel-demo-ecs-task-role | ECS containers | DynamoDB, S3, X-Ray, SNS, SQS, Kinesis, MSK |
+| otel-demo-ecs-task-role | ECS containers | DynamoDB, S3, X-Ray, SNS, SQS, Kinesis, MSK, Aurora (password auth) |
 | otel-demo-ecs-execution-role | ECS Fargate agent | ECR pull, CloudWatch Logs |
 | otel-demo-lambda-role | All Lambda functions | DynamoDB, SQS, Kinesis, X-Ray, CloudWatch Logs |
 | otel-collector-xray-policy | EKS collector (IRSA) | X-Ray PutTraceSegments, GetSamplingRules |
@@ -166,6 +166,8 @@ multi-platform-caller (EKS, every 30s)
   |     |-> SNS (publish) -> multi-sns-consumer (Lambda) -> DynamoDB
   |     |-> SQS (send) -> multi-sqs-consumer (Lambda) -> DynamoDB
   |     |-> Kinesis (put) -> multi-kinesis-consumer (Lambda) -> DynamoDB
+  |     |-> Aurora PostgreSQL (insert order)
+  |     |-> MSK Kafka (publish order event)
   |-> API Gateway /payment -> multi-payment-processor (Lambda)
   |-> ECS ALB /inventory -> multi-inventory-service
 ```
@@ -253,7 +255,7 @@ kubectl port-forward -n otel-demo svc/frontend-proxy 8081:8080
 8. **EKS access entry auto-creation** — Scripts create access entries for deploying IAM role (no manual step)
 9. **Single Lambda zip** — All 4 handlers in one zip; each function references different handler
 10. **ECS traces only in X-Ray** — Sidecars don't connect to EKS Jaeger/Prometheus (would need NLB)
-11. **MSK not used by EKS** — MSK Serverless requires IAM auth + TLS; EKS Kafka clients don't support it
+11. **MSK used by ECS only** — MSK Serverless requires IAM auth + TLS; ECS order-processor uses `aws-msk-iam-sasl-signer-python` for OAUTHBEARER auth; EKS Kafka clients (Go Sarama) don't support IAM auth
 12. **ElastiCache requires TLS** — ECS inventory-service uses `ssl=True`; EKS cart uses in-cluster valkey
 
 ## Cleanup
