@@ -33,7 +33,9 @@ resource = Resource.create({
 provider = TracerProvider(resource=resource)
 otlp_endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
 if otlp_endpoint:
-    exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+    traces_endpoint = f"{otlp_endpoint}/v1/traces"
+    logger.info(f"OTLP traces endpoint: {traces_endpoint}")
+    exporter = OTLPSpanExporter(endpoint=traces_endpoint)
     provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
 tracer = trace.get_tracer(SERVICE_NAME)
