@@ -1,5 +1,9 @@
 # AWS Customizations Reference
 
+> **Main documentation:** [MULTI_PLATFORM_README.md](MULTI_PLATFORM_README.md)
+> This file is a deep-dive reference for OTel Collector configuration.
+> For deployment steps, service inventory, and architecture, see the main README.
+
 Complete list of every change and configuration applied to run the
 vanilla OpenTelemetry Demo on AWS EKS with X-Ray trace export.
 
