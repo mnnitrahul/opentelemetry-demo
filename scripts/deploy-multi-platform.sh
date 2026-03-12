@@ -396,8 +396,8 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app.kubernetes.io/name: otel-demo-otelcol
-    app.kubernetes.io/component: agent-collector
+    app.kubernetes.io/name: opentelemetry-collector
+    component: agent-collector
   ports:
     - name: otlp-http
       port: 4318
