@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Multi-Platform Demo - Lambda payment processor behind API Gateway
+Description: Multi-Platform Demo - Lambda payment processor behind REST API Gateway (X-Ray enabled)
 
 Parameters:
   LambdaCodeBucket:
@@ -33,33 +33,45 @@ Resources:
         - Key: Project
           Value: otel-demo
 
-  HttpApi:
-    Type: AWS::ApiGatewayV2::Api
+  # REST API Gateway (v1) with X-Ray tracing
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
     Properties:
       Name: otel-demo-multi-api
-      ProtocolType: HTTP
+      Description: REST API for multi-platform demo (X-Ray enabled)
 
-  HttpApiStage:
-    Type: AWS::ApiGatewayV2::Stage
+  PaymentResource:
+    Type: AWS::ApiGateway::Resource
     Properties:
-      ApiId: !Ref HttpApi
-      StageName: $default
-      AutoDeploy: true
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: payment
 
-  PaymentIntegration:
-    Type: AWS::ApiGatewayV2::Integration
+  PaymentMethod:
+    Type: AWS::ApiGateway::Method
     Properties:
-      ApiId: !Ref HttpApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !GetAtt PaymentFunction.Arn
-      PayloadFormatVersion: '2.0'
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref PaymentResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PaymentFunction.Arn}/invocations
 
-  PaymentRoute:
-    Type: AWS::ApiGatewayV2::Route
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: PaymentMethod
     Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: POST /payment
-      Target: !Sub integrations/${PaymentIntegration}
+      RestApiId: !Ref RestApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+      TracingEnabled: true
 
   PaymentPermission:
     Type: AWS::Lambda::Permission
@@ -67,16 +79,16 @@ Resources:
       FunctionName: !Ref PaymentFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*
 
 Outputs:
   ApiGatewayUrl:
-    Description: API Gateway URL
-    Value: !GetAtt HttpApi.ApiEndpoint
+    Description: REST API Gateway URL
+    Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod
     Export:
       Name: OtelDemoApiGatewayUrl
   PaymentEndpoint:
     Description: Payment processor endpoint
-    Value: !Sub ${HttpApi.ApiEndpoint}/payment
+    Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/payment
     Export:
       Name: OtelDemoPaymentEndpoint
