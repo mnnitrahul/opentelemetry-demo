@@ -25,9 +25,12 @@ Resources:
       MemorySize: 256
       TracingConfig:
         Mode: Active
+      Layers:
+        - arn:aws:lambda:us-east-1:615299751070:layer:AWSOpenTelemetryDistroPython:14
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-instrument
           OTEL_SERVICE_NAME: multi-payment-processor
       Tags:
         - Key: Project
@@ -97,9 +100,12 @@ Resources:
       MemorySize: 256
       TracingConfig:
         Mode: Active
+      Layers:
+        - arn:aws:lambda:us-east-1:615299751070:layer:AWSOpenTelemetryDistroPython:14
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-instrument
           OTEL_SERVICE_NAME: multi-sqs-consumer
 
   SqsEventSource:
@@ -125,9 +131,12 @@ Resources:
       MemorySize: 256
       TracingConfig:
         Mode: Active
+      Layers:
+        - arn:aws:lambda:us-east-1:615299751070:layer:AWSOpenTelemetryDistroPython:14
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-instrument
           OTEL_SERVICE_NAME: multi-sns-consumer
 
   SnsConsumerPermission:
@@ -160,9 +169,12 @@ Resources:
       MemorySize: 256
       TracingConfig:
         Mode: Active
+      Layers:
+        - arn:aws:lambda:us-east-1:615299751070:layer:AWSOpenTelemetryDistroPython:14
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-instrument
           OTEL_SERVICE_NAME: multi-kinesis-consumer
 
   KinesisEventSource:
