@@ -375,6 +375,11 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ec2/otel-demo/*
+              - Sid: S3Read
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub ${AssetsBucket.Arn}/*
 
   Ec2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -471,6 +476,11 @@ Resources:
           ToPort: 6379
           SourceSecurityGroupId: !Ref EksClusterSG
           Description: Valkey from EKS
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref Ec2InstanceSG
+          Description: Valkey from EC2 instances
       Tags:
         - Key: Name
           Value: otel-demo-valkey-sg
