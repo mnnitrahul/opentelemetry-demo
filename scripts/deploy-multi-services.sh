@@ -83,12 +83,15 @@ LAMBDA_ZIP="/tmp/payment_processor.zip"
 LAMBDA_BUCKET=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --region "${REGION}" \
   --query "Stacks[0].Outputs[?OutputKey=='AssetsBucketName'].OutputValue" --output text)
 
-# Install deps and zip
+# Install deps and zip — include ALL Lambda functions
 LAMBDA_BUILD="/tmp/lambda-build"
 rm -rf "${LAMBDA_BUILD}" "${LAMBDA_ZIP}"
 mkdir -p "${LAMBDA_BUILD}"
 pip install -r "${LAMBDA_DIR}/requirements.txt" -t "${LAMBDA_BUILD}" --quiet 2>/dev/null
 cp "${LAMBDA_DIR}/payment_processor.py" "${LAMBDA_BUILD}/"
+cp "${LAMBDA_DIR}/sqs_consumer.py" "${LAMBDA_BUILD}/"
+cp "${LAMBDA_DIR}/sns_consumer.py" "${LAMBDA_BUILD}/"
+cp "${LAMBDA_DIR}/kinesis_consumer.py" "${LAMBDA_BUILD}/"
 (cd "${LAMBDA_BUILD}" && zip -r "${LAMBDA_ZIP}" . -q)
 
 aws s3 cp "${LAMBDA_ZIP}" "s3://${LAMBDA_BUCKET}/lambda/payment_processor.zip" --region "${REGION}"

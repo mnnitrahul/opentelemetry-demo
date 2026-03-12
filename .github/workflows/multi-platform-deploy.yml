@@ -70,6 +70,13 @@ jobs:
 
           aws eks update-kubeconfig --name "${CLUSTER}" --region "${REGION}"
 
+          # Ensure GitHub Actions role has EKS access
+          ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
+          aws eks create-access-entry --cluster-name "${CLUSTER}" --principal-arn "${ROLE_ARN}" --region "${REGION}" 2>/dev/null || true
+          aws eks associate-access-policy --cluster-name "${CLUSTER}" --principal-arn "${ROLE_ARN}" \
+            --policy-arn "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" \
+            --access-scope type=cluster --region "${REGION}" 2>/dev/null || true
+
           eksctl create iamserviceaccount --name otel-collector --namespace "${NAMESPACE}" \
             --cluster "${CLUSTER}" --region "${REGION}" --attach-policy-arn "${POLICY_ARN}" \
             --role-name otel-collector-xray-role --approve --override-existing-serviceaccounts || true
@@ -112,15 +119,13 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text 2>/dev/null || echo "N/A")
           APIGW=$(aws cloudformation describe-stacks --region "${REGION}" --stack-name otel-demo-lambda \
             --query "Stacks[0].Outputs[?OutputKey=='ApiGatewayUrl'].OutputValue" --output text 2>/dev/null || echo "N/A")
-          EC2_ALB=$(aws cloudformation describe-stacks --region "${REGION}" --stack-name otel-demo-ec2 \
-            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text 2>/dev/null || echo "N/A")
           echo "============================================"
           echo "  1. Original EKS App (cluster: otel-demo)"
           echo "     kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080"
           echo ""
           echo "  2. Multi-Platform App (cluster: otel-demo-multi)"
           echo "     kubectl port-forward -n otel-demo svc/frontend-proxy 8081:8080"
-          echo "     ECS: ${ECS_ALB} | APIGW: ${APIGW} | EC2: ${EC2_ALB}"
+          echo "     ECS: ${ECS_ALB} | APIGW: ${APIGW}"
           echo ""
           echo "  X-Ray: https://${REGION}.console.aws.amazon.com/xray/home#/service-map"
           echo "============================================"

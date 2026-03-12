@@ -24,15 +24,14 @@ CFN_DIR="${SCRIPT_DIR}/cfn"
 SHARED_STACK="otel-demo-shared"
 ECS_STACK="otel-demo-ecs"
 LAMBDA_STACK="otel-demo-lambda"
-EC2_STACK="otel-demo-ec2"
-DEPLOY_ORDER=("${SHARED_STACK}" "${ECS_STACK}" "${LAMBDA_STACK}" "${EC2_STACK}")
+EC2_STACK="otel-demo-ec2"  # Unused — kept for cleanup compatibility
+DEPLOY_ORDER=("${SHARED_STACK}" "${ECS_STACK}" "${LAMBDA_STACK}")
 
 # CFN template paths (relative to CFN_DIR)
 declare -A STACK_TEMPLATES=(
   ["${SHARED_STACK}"]="shared.yaml"
   ["${ECS_STACK}"]="ecs.yaml"
   ["${LAMBDA_STACK}"]="lambda.yaml"
-  ["${EC2_STACK}"]="ec2-asg.yaml"
 )
 
 # ---------------------------------------------------------------------------
@@ -96,6 +95,29 @@ else
 fi
 
 aws eks update-kubeconfig --name "${MULTI_CLUSTER}" --region "${REGION}"
+
+# Ensure the current IAM role/user has EKS access
+echo "  Ensuring EKS access entry for current identity..."
+CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text)
+# For assumed roles, extract the role ARN
+if [[ "${CALLER_ARN}" == *":assumed-role/"* ]]; then
+  ROLE_NAME=$(echo "${CALLER_ARN}" | cut -d'/' -f2)
+  ACCOUNT_ID_TMP=$(aws sts get-caller-identity --query Account --output text)
+  PRINCIPAL_ARN="arn:aws:iam::${ACCOUNT_ID_TMP}:role/${ROLE_NAME}"
+else
+  PRINCIPAL_ARN="${CALLER_ARN}"
+fi
+aws eks create-access-entry \
+  --cluster-name "${MULTI_CLUSTER}" \
+  --principal-arn "${PRINCIPAL_ARN}" \
+  --region "${REGION}" 2>/dev/null || true
+aws eks associate-access-policy \
+  --cluster-name "${MULTI_CLUSTER}" \
+  --principal-arn "${PRINCIPAL_ARN}" \
+  --policy-arn "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" \
+  --access-scope type=cluster \
+  --region "${REGION}" 2>/dev/null || true
+echo "  EKS access entry configured."
 
 # ---------------------------------------------------------------------------
 # Step 3: Discover EKS VPC networking
@@ -382,32 +404,9 @@ kubectl annotate serviceaccount otel-collector -n "${NAMESPACE}" \
   --overwrite 2>/dev/null || true
 kubectl rollout restart daemonset/otel-collector-agent -n "${NAMESPACE}" 2>/dev/null || true
 
-# Create internal NLB for OTel Collector (so ECS/EC2 can send OTLP)
-echo "  Creating OTel Collector NLB..."
-cat <<NLBEOF | kubectl apply -f - 2>/dev/null || true
-apiVersion: v1
-kind: Service
-metadata:
-  name: otel-collector-nlb
-  namespace: ${NAMESPACE}
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: nlb
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
-spec:
-  type: LoadBalancer
-  selector:
-    app.kubernetes.io/name: opentelemetry-collector
-    component: agent-collector
-  ports:
-    - name: otlp-http
-      port: 4318
-      targetPort: 4318
-      protocol: TCP
-    - name: otlp-grpc
-      port: 4317
-      targetPort: 4317
-      protocol: TCP
-NLBEOF
+# NLB no longer needed — ECS tasks use collector sidecars
+# Clean up any leftover NLB service from previous deployments
+kubectl delete svc otel-collector-nlb -n "${NAMESPACE}" 2>/dev/null || true
 
 echo ""
 echo "============================================"

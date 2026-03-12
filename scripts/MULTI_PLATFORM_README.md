@@ -1,87 +1,210 @@
 # Multi-Platform OpenTelemetry Demo
 
-Extends the OpenTelemetry Astronomy Shop demo to run across multiple AWS
-compute platforms (EKS, ECS, Lambda, EC2) with cross-platform tracing
-via AWS X-Ray.
+Extends the [OpenTelemetry Astronomy Shop](https://opentelemetry.io/docs/demo/) demo
+to run across multiple AWS compute platforms — EKS, ECS Fargate, and Lambda — with
+unified cross-platform tracing via AWS X-Ray.
 
-## Architecture
+## Table of Contents
+
+- [Architecture Overview](#architecture-overview)
+- [Service Inventory](#service-inventory)
+- [AWS Resource Inventory](#aws-resource-inventory)
+- [Trace Flow and Dependencies](#trace-flow-and-dependencies)
+- [Prerequisites](#prerequisites)
+- [Deployment Steps](#deployment-steps)
+- [Accessing the UIs](#accessing-the-uis)
+- [Configuration Changes and Rationale](#configuration-changes-and-rationale)
+- [Cleanup](#cleanup)
+- [Troubleshooting](#troubleshooting)
+
+## Architecture Overview
+
+Two separate EKS clusters run side by side:
+- `otel-demo` — the original Astronomy Shop (unchanged)
+- `otel-demo-multi` — the multi-platform version with `multi-` prefixed service names
 
 ```
-EKS Cluster (otel-demo-multi)
-├── Full OTel Demo App (frontend, load-generator, all services)
-├── OTel Collector → Jaeger + Prometheus + X-Ray
-├── Grafana, Prometheus, OpenSearch
-└── multi-platform-caller pod → calls ECS, Lambda, EC2
+EKS Cluster: otel-demo-multi
+  multi-load-generator -> multi-frontend -> All OTel Demo Services
+  multi-platform-caller (calls ECS + Lambda every 30s)
+  OTel Collector -> Jaeger + Prometheus + X-Ray (sigv4auth)
 
-ECS Fargate (order-processor)
-├── Flask app + X-Ray daemon sidecar
-├── Writes to DynamoDB, reads S3
-├── Calls Lambda (via API Gateway) and EC2 (via ALB)
-└── Traces → X-Ray via daemon
+ECS Fargate (behind ALB)
+  multi-order-processor  + collector sidecar -> X-Ray
+  multi-inventory-service + collector sidecar -> X-Ray
 
-Lambda (payment-processor)
-├── Python function behind API Gateway HTTP API
-├── Writes to DynamoDB
-└── Traces → X-Ray natively (built-in)
-
-EC2 ASG (inventory-service)
-├── Flask app + X-Ray daemon (Docker containers)
-├── Reads/writes ElastiCache Redis, reads S3
-└── Traces → X-Ray via daemon
+Lambda (behind REST API Gateway)
+  multi-payment-processor  (API GW POST /payment)
+  multi-sqs-consumer       (SQS trigger)
+  multi-sns-consumer       (SNS trigger)
+  multi-kinesis-consumer   (Kinesis trigger)
+  All use ADOT Python layer for Application Signals
 
 AWS Managed Services
-├── DynamoDB (otel-demo-orders)
-├── S3 (otel-demo-assets-{account})
-├── SQS (otel-demo-notifications)
-├── ElastiCache Serverless (Valkey/Redis)
-├── Aurora Serverless v2 (PostgreSQL)
-└── MSK Serverless (Kafka)
+  DynamoDB | S3 | SNS | SQS | Kinesis | ElastiCache | Aurora | MSK
 ```
+
+## Service Inventory
+
+### EKS Services (cluster: otel-demo-multi)
+
+All standard OTel Demo services run on EKS with `multi-` prefixed names.
+They use the in-cluster OTel Collector which exports to Jaeger, Prometheus, and X-Ray.
+
+| Service | Language | OTEL_SERVICE_NAME | Port |
+|---------|----------|-------------------|------|
+| Frontend | Next.js | multi-frontend | 8080 |
+| Frontend Proxy | Envoy | multi-frontend-proxy | 8080 |
+| Load Generator | Python/Locust | multi-load-generator | 8089 |
+| Cart | .NET | multi-cart | 8080 |
+| Checkout | Go | multi-checkout | 8080 |
+| Currency | C++ | multi-currency | 8080 |
+| Email | Ruby | multi-email | 8080 |
+| Payment | Node.js | multi-payment | 8080 |
+| Product Catalog | Go | multi-product-catalog | 8080 |
+| Product Reviews | Python | multi-product-reviews | 3551 |
+| Recommendation | Python | multi-recommendation | 8080 |
+| Shipping | Rust | multi-shipping | 8080 |
+| Ad | Java | multi-ad | 8080 |
+| Quote | PHP | multi-quote | 8080 |
+| Accounting | .NET | multi-accounting | — |
+| Fraud Detection | Kotlin | multi-fraud-detection | — |
+| Flagd | Go | multi-flagd | 8013 |
+| Image Provider | Go | multi-image-provider | 8081 |
+| Platform Caller | Python | multi-platform-caller | — |
+
+### ECS Fargate Services
+
+Each ECS task runs the app container + an OTel Collector Contrib sidecar.
+The sidecar uses `sigv4auth` to export traces to X-Ray's OTLP endpoint.
+
+| Service | OTEL_SERVICE_NAME | Image Source | Port |
+|---------|-------------------|-------------|------|
+| Order Processor | multi-order-processor | `src/multi-platform/ecs/` | 8080 |
+| Inventory Service | multi-inventory-service | `src/multi-platform/ec2/` | 8080 |
+
+Both behind a single ALB: `/order*` -> order-processor, `/inventory*` -> inventory-service.
+
+### Lambda Functions
+
+All use ADOT Python layer for Application Signals and X-Ray active tracing.
+
+| Function | OTEL_SERVICE_NAME | Trigger | Handler |
+|----------|-------------------|---------|---------|
+| Payment Processor | multi-payment-processor | REST API Gateway POST /payment | payment_processor.handler |
+| SQS Consumer | multi-sqs-consumer | SQS queue (otel-demo-order-queue) | sqs_consumer.handler |
+| SNS Consumer | multi-sns-consumer | SNS topic (otel-demo-order-topic) | sns_consumer.handler |
+| Kinesis Consumer | multi-kinesis-consumer | Kinesis stream (otel-demo-order-stream) | kinesis_consumer.handler |
+
+## AWS Resource Inventory
+
+### CloudFormation Stacks
+
+| Stack | Template | Resources |
+|-------|----------|-----------|
+| otel-demo-shared | `cfn/shared.yaml` | Security groups, IAM roles, DynamoDB, S3, SQS, SNS, Kinesis, ElastiCache, Aurora, MSK |
+| otel-demo-ecs | `cfn/ecs.yaml` | ECS Fargate cluster, ALB, 2 task definitions with collector sidecars |
+| otel-demo-lambda | `cfn/lambda.yaml` | 4 Lambda functions, REST API Gateway, event source mappings |
+
+### AWS Managed Services
+
+| Service | Resource Name | Used By | Purpose |
+|---------|--------------|---------|---------|
+| DynamoDB | otel-demo-orders | ECS order-processor, all Lambda functions | Order and payment records |
+| S3 | otel-demo-assets-{account} | ECS order-processor, ECS inventory-service | Product catalog JSON |
+| SNS | otel-demo-order-topic | ECS order-processor -> Lambda sns-consumer | Order event fan-out |
+| SQS | otel-demo-order-queue | ECS order-processor -> Lambda sqs-consumer | Order event queue |
+| Kinesis | otel-demo-order-stream | ECS order-processor -> Lambda kinesis-consumer | Order event stream |
+| ElastiCache | otel-demo-valkey | ECS inventory-service | Inventory cache (Valkey, TLS required) |
+| Aurora | otel-demo-postgres | EKS product-catalog, product-reviews | Product database (in-cluster pg used instead) |
+| MSK | otel-demo-kafka | ECS order-processor (if MSK_BOOTSTRAP set) | Kafka messaging |
+
+### IAM Roles
+
+| Role | Used By | Key Permissions |
+|------|---------|----------------|
+| github-actions-otel-demo | GitHub Actions OIDC | Full demo deployment (EKS, ECS, Lambda, CFN, ECR, S3, SNS, SQS, Kinesis, DynamoDB, etc.) |
+| otel-demo-ecs-task-role | ECS task containers | DynamoDB write, S3 read, X-Ray, SNS publish, SQS send, Kinesis put, MSK |
+| otel-demo-ecs-execution-role | ECS Fargate agent | ECR pull, CloudWatch Logs |
+| otel-demo-lambda-role | All Lambda functions | DynamoDB read/write, SQS consume, Kinesis read, X-Ray, CloudWatch Logs |
+| otel-collector-xray-policy | EKS collector SA (IRSA) | X-Ray PutTraceSegments, GetSamplingRules |
+
+## Trace Flow and Dependencies
+
+```
+multi-load-generator -> multi-frontend-proxy -> multi-frontend
+  -> multi-checkout -> multi-cart, multi-currency, multi-payment,
+                       multi-shipping, multi-product-catalog, multi-email
+
+multi-platform-caller (EKS pod, every 30s)
+  |-> ECS ALB /order -> multi-order-processor
+  |     |-> DynamoDB (put order)
+  |     |-> S3 (read catalog)
+  |     |-> API Gateway /payment -> multi-payment-processor (Lambda) -> DynamoDB
+  |     |-> ECS ALB /inventory -> multi-inventory-service -> ElastiCache, S3
+  |     |-> SNS (publish) -> multi-sns-consumer (Lambda) -> DynamoDB
+  |     |-> SQS (send) -> multi-sqs-consumer (Lambda) -> DynamoDB
+  |     |-> Kinesis (put) -> multi-kinesis-consumer (Lambda) -> DynamoDB
+  |-> API Gateway /payment -> multi-payment-processor (Lambda)
+  |-> ECS ALB /inventory -> multi-inventory-service
+```
+
+### Telemetry Export Paths
+
+| Platform | SDK | Destination |
+|----------|-----|-------------|
+| EKS services | Vanilla OTel SDK (per language) | In-cluster collector -> Jaeger + Prometheus + X-Ray |
+| ECS services | Vanilla OTel Python SDK | Localhost sidecar collector -> X-Ray (sigv4auth) |
+| Lambda functions | ADOT Python layer | X-Ray (native Lambda integration) |
+| EKS caller | Vanilla OTel Python SDK | In-cluster collector -> Jaeger + Prometheus + X-Ray |
 
 ## Prerequisites
 
-- AWS CLI configured with admin credentials
+- AWS CLI v2 configured with credentials that can create IAM roles
 - [eksctl](https://eksctl.io/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- [Helm](https://helm.sh/docs/intro/install/)
-- Docker (for building service images)
-- Python 3.12+ (for Lambda packaging)
-- GitHub repo with `AWS_ROLE_ARN` secret configured
+- [Helm](https://helm.sh/docs/intro/install/) v3
+- Docker (for building ECS/caller images)
+- Python 3.12+ with pip (for Lambda packaging)
+- A GitHub repository (for CI/CD)
 
-## Quick Start (GitHub Actions)
+## Deployment Steps
 
-```bash
-# 1. Set up IAM (one-time per account)
-./scripts/setup-iam-oidc.sh <github-org/repo>
+### Step 1: Set Up GitHub Actions IAM (one-time per account)
 
-# 2. Add AWS_ROLE_ARN secret to GitHub repo
-
-# 3. Push to main — auto-deploys both apps
-git push
-
-# Or trigger manually:
-# Actions → "Multi-Platform Deploy" → Run workflow → deploy
-```
-
-The workflow deploys:
-1. Original EKS-only app on `otel-demo` cluster
-2. Multi-platform app on `otel-demo-multi` cluster + ECS/Lambda/EC2
-
-## Manual Deployment
+Creates an OIDC identity provider and IAM role for GitHub Actions.
 
 ```bash
-# Step 1: IAM setup
 ./scripts/setup-iam-oidc.sh <github-org/repo>
-
-# Step 2: Deploy original EKS app
-./scripts/setup-eks.sh
-
-# Step 3: Deploy multi-platform (creates second EKS cluster + CFN stacks)
-./scripts/deploy-multi-platform.sh --region us-east-1 --cluster otel-demo
-
-# Step 4: Deploy ECS/Lambda/EC2 services
-./scripts/deploy-multi-services.sh --region us-east-1
+# Example: ./scripts/setup-iam-oidc.sh mnnitrahul/opentelemetry-demo
 ```
+
+Add the output role ARN as a GitHub Actions secret:
+1. Go to `https://github.com/<org>/<repo>/settings/secrets/actions/new`
+2. Name: `AWS_ROLE_ARN`
+3. Value: the ARN (e.g., `arn:aws:iam::123456789012:role/github-actions-otel-demo`)
+
+### Step 2: Deploy via GitHub Actions (recommended)
+
+Push to `main` — auto-deploys everything:
+```bash
+git push origin main
+```
+Or: Actions -> "Multi-Platform Deploy" -> Run workflow -> `deploy`
+
+### Step 3: Manual Deployment (alternative)
+
+```bash
+./scripts/setup-eks.sh                                          # Original EKS app
+./scripts/deploy-multi-platform.sh --region us-east-1 --cluster otel-demo  # Multi EKS + shared CFN
+./scripts/deploy-multi-services.sh --region us-east-1           # ECS + Lambda + caller
+```
+
+| Script | Creates |
+|--------|---------|
+| `setup-iam-oidc.sh` | OIDC provider, IAM policy, IAM role for GitHub Actions |
+| `deploy-multi-platform.sh` | EKS cluster `otel-demo-multi`, shared CFN stack, IRSA, Helm release |
+| `deploy-multi-services.sh` | ECR repos, Docker images, Lambda zip, ECS/Lambda CFN stacks, caller pod |
 
 ## Accessing the UIs
 
@@ -100,169 +223,114 @@ kubectl port-forward -n otel-demo svc/frontend-proxy 8081:8080
 | Astronomy Shop | http://localhost:8080 | http://localhost:8081 |
 | Grafana | http://localhost:8080/grafana | http://localhost:8081/grafana |
 | Jaeger | http://localhost:8080/jaeger/ui | http://localhost:8081/jaeger/ui |
-| X-Ray | https://us-east-1.console.aws.amazon.com/xray/home#/service-map |
+| X-Ray | [Console](https://us-east-1.console.aws.amazon.com/xray/home#/service-map) | Same |
 
-## Telemetry Configuration
+## Configuration Changes and Rationale
 
-### EKS Services (OTel Collector)
+### 1. Separate EKS Cluster (otel-demo-multi)
+- **Change:** Multi-platform services run on a second EKS cluster instead of the original.
+- **Reason:** Avoids Helm release conflicts. The original `otel-demo` release uses default service names; the multi-platform release needs `multi-` prefixed names which requires `useDefault.env: false` on every service.
+- **Impact:** Two clusters run simultaneously. Both export to the same X-Ray account, so all services appear in one service map.
 
-Services send OTLP to the in-cluster OTel Collector which exports to:
-- Jaeger (in-cluster, for open-source trace viewing)
-- Prometheus (in-cluster, for metrics + Grafana dashboards)
-- X-Ray (via `otlphttp/xray` exporter with `sigv4auth`)
+### 2. useDefault.env: false on All Helm Components
+- **Change:** Every service in `helm-values-multi.yaml` sets `useDefault.env: false` and provides a complete env block.
+- **Reason:** The OTel Demo Helm chart sets `OTEL_SERVICE_NAME` via Kubernetes `fieldRef` (pod label). This cannot be overridden with `envOverrides` because Kubernetes rejects duplicate env keys.
+- **Impact:** Verbose Helm values file (~500 lines). Any new env var added upstream must be manually added here.
 
-Key Helm values (`helm-values-multi.yaml`):
-```yaml
-opentelemetry-collector:
-  config:
-    extensions:
-      sigv4auth:
-        region: us-east-1
-        service: xray
-    exporters:
-      otlphttp/xray:
-        endpoint: https://xray.us-east-1.amazonaws.com
-        auth:
-          authenticator: sigv4auth
-    service:
-      pipelines:
-        traces:
-          exporters: [otlp/jaeger, debug, spanmetrics, otlphttp/xray]
-```
+### 3. ECS Collector Sidecars (not shared NLB)
+- **Change:** Each ECS task definition includes an `otel/opentelemetry-collector-contrib` sidecar container. No shared NLB.
+- **Reason:** Sidecars are simpler and more reliable than routing OTLP traffic through an NLB to the EKS cluster. Each sidecar has its own `sigv4auth` config and uses the ECS task role for AWS credentials.
+- **Impact:** Slightly higher ECS resource usage. ECS traces go directly to X-Ray, not through Jaeger/Prometheus.
 
-IRSA provides AWS credentials to the collector pod:
-```bash
-eksctl create iamserviceaccount --name otel-collector --namespace otel-demo \
-  --cluster otel-demo-multi --attach-policy-arn <xray-policy-arn> \
-  --role-name otel-collector-xray-role-multi --approve
-```
+### 4. Vanilla OTel SDK on ECS (not X-Ray SDK)
+- **Change:** ECS services use `opentelemetry-sdk`, `opentelemetry-instrumentation-*` packages with OTLP exporter.
+- **Reason:** User requirement to use vanilla OTel SDK everywhere except Lambda. The collector sidecar handles X-Ray export via `sigv4auth`.
+- **Impact:** Auto-instrumentation covers Flask, requests, botocore, redis.
 
-### ECS Services (X-Ray SDK + Daemon Sidecar)
+### 5. Lambda Uses ADOT Python Layer (Application Signals)
+- **Change:** Lambda functions use the ADOT Python layer with `AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-instrument`.
+- **Reason:** Lambda cannot reach an external OTel Collector. The ADOT layer auto-instruments and exports via X-Ray.
+- **Impact:** Lambda functions also use `aws-xray-sdk` for `patch_all()` to trace boto3 calls.
 
-The ECS task runs two containers:
-1. Application container with `aws-xray-sdk` Python library
-2. X-Ray daemon sidecar (`public.ecr.aws/xray/aws-xray-daemon`)
+### 6. REST API Gateway (v1) Instead of HTTP API (v2)
+- **Change:** Payment processor Lambda is behind a REST API Gateway with `TracingEnabled: true`.
+- **Reason:** REST API Gateway (v1) supports X-Ray tracing natively. HTTP API (v2) does not.
+- **Impact:** API Gateway node appears in X-Ray traces between caller/ECS and Lambda.
 
-The X-Ray SDK auto-patches boto3 and requests:
-```python
-from aws_xray_sdk.core import xray_recorder, patch_all
-from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
+### 7. OTEL_PROPAGATORS=xray,tracecontext,baggage on ECS and Caller
+- **Change:** ECS order-processor and EKS caller set `OTEL_PROPAGATORS=xray,tracecontext,baggage`.
+- **Reason:** API Gateway uses X-Ray trace header format. The `xray` propagator (from `opentelemetry-propagator-aws-xray`, open-source OTel Contrib) ensures trace context propagates through API Gateway.
+- **Impact:** Requires `opentelemetry-propagator-aws-xray` pip package.
 
-xray_recorder.configure(service='multi-order-processor')
-patch_all()  # Patches boto3, requests, etc.
-XRayMiddleware(app, xray_recorder)
-```
+### 8. EKS Access Entry for GitHub Actions Role
+- **Change:** Deploy scripts automatically create an EKS access entry for the deploying IAM role.
+- **Reason:** Without an access entry, `kubectl` commands fail with 403 even with `eks:*` IAM permissions.
+- **Impact:** Automated in scripts — no manual step needed in a new account.
 
-IAM: ECS task role needs `xray:PutTraceSegments` with `Resource: *`.
+### 9. All Lambda Functions in Single Zip
+- **Change:** All 4 Lambda handlers packaged into one zip uploaded to S3.
+- **Reason:** Simplifies deployment. Each Lambda references a different handler in the same zip.
 
-### Lambda Functions (X-Ray SDK + Native Tracing)
+### 10. ECS Jaeger/Prometheus Limitation
+- **Change:** ECS services do NOT send traces to Jaeger or Prometheus (only X-Ray).
+- **Reason:** ECS collector sidecars export directly to X-Ray. Connecting to EKS Jaeger would require an NLB.
+- **Impact:** ECS traces visible only in X-Ray. EKS traces appear in both Jaeger and X-Ray.
 
-Lambda has built-in X-Ray support. The function uses:
-```python
-from aws_xray_sdk.core import xray_recorder, patch_all
-patch_all()  # Patches boto3 calls
-```
+### 11. MSK Serverless Not Used by EKS Services
+- **Change:** EKS services use in-cluster Kafka pod. MSK available for ECS if `MSK_BOOTSTRAP` is set.
+- **Reason:** MSK Serverless requires IAM auth + TLS which EKS Kafka clients don't support without code changes.
 
-CloudFormation: `TracingConfig: Mode: Active` on the function.
-IAM: Lambda role needs `xray:PutTraceSegments`.
-
-### EC2 Services (X-Ray SDK + Daemon Container)
-
-EC2 instances run two Docker containers:
-1. Application container with `aws-xray-sdk`
-2. X-Ray daemon container (`public.ecr.aws/xray/aws-xray-daemon`)
-
-Both run via Docker on the instance. The daemon listens on UDP port 2000.
-IAM: EC2 instance role needs `xray:PutTraceSegments` + ECR pull.
-
-## Service Names
-
-All multi-platform services use `service.namespace=otel-demo-multi`:
-
-| Platform | Service | service.name |
-|----------|---------|-------------|
-| EKS | All demo services | Original names (frontend, checkout, etc.) |
-| ECS | Order Processor | multi-order-processor |
-| Lambda | Payment Processor | multi-payment-processor |
-| EC2 | Inventory Service | multi-inventory-service |
-
-## AWS Managed Services
-
-| Service | Resource | Used By |
-|---------|----------|---------|
-| DynamoDB | otel-demo-orders | ECS (order records), Lambda (payments) |
-| S3 | otel-demo-assets-{account} | ECS (catalog), EC2 (catalog) |
-| SQS | otel-demo-notifications | Checkout → Email |
-| ElastiCache | otel-demo-valkey | EC2 inventory (cache) |
-| Aurora | otel-demo-postgres | Product catalog, reviews |
-| MSK | otel-demo-kafka | Accounting, fraud-detection |
-
-## CloudFormation Stacks
-
-| Stack | Resources |
-|-------|-----------|
-| otel-demo-shared | SGs, IAM roles, DynamoDB, S3, SQS, ElastiCache, Aurora, MSK |
-| otel-demo-ecs | ECS Fargate cluster, ALB, task definition with X-Ray sidecar |
-| otel-demo-lambda | Lambda function, API Gateway HTTP API |
-| otel-demo-ec2 | EC2 ASG, ALB, launch template with X-Ray daemon |
+### 12. ElastiCache Serverless Requires TLS
+- **Change:** ECS inventory-service connects to ElastiCache with `ssl=True`. EKS cart uses in-cluster valkey-cart.
+- **Reason:** ElastiCache Serverless mandates TLS connections.
 
 ## Cleanup
 
+**Destroy multi-platform only:**
 ```bash
-# Destroy multi-platform only (keeps original EKS app)
 ./scripts/cleanup-multi-platform.sh --region us-east-1 --keep-eks
+```
 
-# Destroy everything
+**Destroy everything:**
+```bash
 ./scripts/cleanup-multi-platform.sh --region us-east-1
 ./scripts/cleanup-eks.sh
 ```
 
+**Via GitHub Actions:** Actions -> "Multi-Platform Deploy" -> Run workflow -> `destroy`
+
+**Manual (if scripts fail):** Delete in order: otel-demo-lambda -> otel-demo-ecs -> empty S3 -> otel-demo-shared -> eksctl delete cluster.
+
 ## Troubleshooting
 
-See the troubleshooting section in `scripts/README.md`.
+**ECS tasks not starting:** Check CloudWatch Logs `/ecs/otel-demo-multi/*`. Verify ECR images and security groups.
 
-## Limitations and Design Decisions
+**Traces not in X-Ray:** EKS: verify IRSA on `otel-collector` SA. ECS: check collector sidecar logs. Lambda: verify `TracingConfig.Mode: Active` and ADOT layer.
 
-### Shared OTel Collector for X-Ray Export
+**API Gateway not in X-Ray:** Must be REST API Gateway (v1) with `TracingEnabled: true`. Caller/ECS must use `OTEL_PROPAGATORS=xray,tracecontext,baggage`.
 
-All services (EKS, ECS, EC2) send OTLP to a single OTel Collector
-running on the EKS cluster, exposed via an internal NLB. The collector
-handles sigv4 authentication for X-Ray export using IRSA credentials.
+**CloudFormation ROLLBACK_COMPLETE:** Deploy scripts handle this automatically.
 
-**Why:** X-Ray's OTLP endpoint requires AWS Signature V4 on every
-request. The vanilla OTel SDK doesn't support sigv4 natively. Rather
-than adding AWS-specific auth to each service, the collector centralizes
-it. The `sigv4auth` extension is open-source (OTel Collector Contrib).
+**EKS access denied (403):** Scripts auto-create access entries. Manual: `aws eks create-access-entry` + `aws eks associate-access-policy`.
 
-**Alternative:** Run a collector sidecar on each ECS task and EC2
-instance with its own IAM role. This adds complexity but removes the
-NLB dependency.
+## File Structure
 
-### Lambda Uses X-Ray SDK (Not OTel SDK)
-
-Lambda functions use the AWS X-Ray SDK instead of vanilla OTel SDK
-because Lambda has built-in X-Ray support and cannot reach the
-external OTel Collector. The X-Ray SDK auto-patches boto3 calls and
-uses Lambda's built-in X-Ray daemon.
-
-### Helm Chart OTEL_SERVICE_NAME Override
-
-The OTel Demo Helm chart sets `OTEL_SERVICE_NAME` via Kubernetes
-`fieldRef` (pod label). This cannot be overridden via `envOverrides`
-without creating duplicate env keys. The workaround is `useDefault.env: false`
-with complete env blocks for every service — verbose but the only way
-to set custom service names.
-
-### MSK Serverless Not Used
-
-MSK Serverless requires IAM auth + TLS which the demo's Kafka clients
-(Go Sarama, Java) don't support without code changes. Kafka runs as
-an in-cluster pod instead. MSK Serverless infrastructure exists in the
-shared CFN stack but is unused.
-
-### ElastiCache Serverless Requires TLS
-
-ElastiCache Serverless (Valkey) requires TLS connections. The Python
-Redis client supports this with `ssl=True`. The EKS cart service uses
-the in-cluster valkey-cart pod (no TLS) while the ECS inventory service
-connects to ElastiCache Serverless with TLS.
+```
+scripts/
+  setup-iam-oidc.sh          # One-time: GitHub OIDC + IAM role
+  deploy-multi-platform.sh    # EKS cluster + shared CFN + Helm
+  deploy-multi-services.sh    # Docker build + ECS/Lambda CFN + caller pod
+  cleanup-multi-platform.sh   # Tear down everything
+  helm-values-multi.yaml      # Helm values with multi- prefixed services
+  cfn/
+    shared.yaml               # SGs, IAM, DynamoDB, S3, SQS, SNS, Kinesis, ElastiCache, Aurora, MSK
+    ecs.yaml                  # ECS Fargate + ALB + collector sidecars
+    lambda.yaml               # Lambda functions + REST API Gateway
+src/multi-platform/
+  ecs/app.py                  # Order processor (Flask + OTel SDK)
+  ec2/app.py                  # Inventory service (Flask + OTel SDK)
+  caller/app.py               # Platform caller (OTel SDK, calls ECS+Lambda)
+  lambda/                     # Lambda handlers (X-Ray SDK)
+.github/workflows/
+  multi-platform-deploy.yml   # CI/CD: deploy on push to main
+```
