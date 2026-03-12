@@ -142,9 +142,53 @@ echo "  Order processor: http://${ECS_ALB}/order"
 # Step 5: Upload sample catalog to S3
 # ---------------------------------------------------------------------------
 echo ""
-echo "[5/5] Uploading sample data..."
+echo "[5/6] Uploading sample data..."
 echo '{"products":[{"id":"OLJCESPC7Z","name":"Telescope","price":99.99}]}' | \
   aws s3 cp - "s3://${S3_BUCKET}/catalog.json" --region "${REGION}"
+
+# ---------------------------------------------------------------------------
+# Step 6: Deploy caller pod on EKS to generate cross-platform traffic
+# ---------------------------------------------------------------------------
+echo ""
+echo "[6/6] Deploying cross-platform caller pod..."
+
+cat > /tmp/caller.yaml << CALLEREOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-platform-caller
+  namespace: otel-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multi-platform-caller
+  template:
+    metadata:
+      labels:
+        app: multi-platform-caller
+    spec:
+      containers:
+      - name: caller
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          while true; do
+            echo "--- Calling ECS order-processor ---"
+            curl -s --max-time 15 http://${ECS_ALB}/order
+            echo ""
+            echo "--- Calling Lambda payment-processor ---"
+            curl -s --max-time 10 -X POST ${PAYMENT_ENDPOINT} -H 'Content-Type: application/json' -d '{"order_id":"auto","amount":9.99}'
+            echo ""
+            echo "--- Calling EC2 inventory-service ---"
+            curl -s --max-time 10 http://${EC2_ALB}/inventory
+            echo ""
+            sleep 30
+          done
+CALLEREOF
+
+kubectl apply -f /tmp/caller.yaml 2>/dev/null || echo "  Warning: could not deploy caller pod (kubectl not configured for multi cluster)"
 
 echo ""
 echo "============================================"

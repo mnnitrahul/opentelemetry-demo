@@ -232,7 +232,7 @@ Resources:
                   - xray:PutTelemetryRecords
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
-                Resource: !Sub arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*
+                Resource: "*"
               - Sid: S3Read
                 Effect: Allow
                 Action:
@@ -317,7 +317,7 @@ Resources:
                   - xray:PutTelemetryRecords
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
-                Resource: !Sub arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*
+                Resource: "*"
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
@@ -352,6 +352,9 @@ Resources:
             Principal:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
         - PolicyName: otel-demo-ec2-instance-policy
           PolicyDocument:
@@ -364,7 +367,7 @@ Resources:
                   - xray:PutTelemetryRecords
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
-                Resource: !Sub arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*
+                Resource: "*"
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
