@@ -115,15 +115,7 @@ wait_for_stack_delete() {
   fi
 }
 
-# Get OTel Collector endpoint (internal NLB on the multi EKS cluster)
-COLLECTOR_NLB=$(kubectl get svc otel-collector-nlb -n otel-demo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-if [[ -n "${COLLECTOR_NLB}" ]]; then
-  OTEL_ENDPOINT="http://${COLLECTOR_NLB}:4318"
-  echo "  OTel Collector NLB: ${OTEL_ENDPOINT}"
-else
-  OTEL_ENDPOINT=""
-  echo "  Warning: OTel Collector NLB not found. Traces will not be exported."
-fi
+# No NLB needed — each ECS task has its own collector sidecar
 VALKEY_ENDPOINT=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --region "${REGION}" \
   --query "Stacks[0].Outputs[?OutputKey=='ValkeyEndpoint'].OutputValue" --output text 2>/dev/null || echo "")
 S3_BUCKET=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --region "${REGION}" \
@@ -147,6 +139,17 @@ echo "  Payment endpoint: ${PAYMENT_ENDPOINT}"
 # Deploy ECS stack (both order-processor and inventory-service)
 echo "  Deploying ECS stack..."
 wait_for_stack_delete "otel-demo-ecs"
+
+# Resolve MSK bootstrap brokers
+MSK_CLUSTER_ARN=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --region "${REGION}" \
+  --query "Stacks[0].Outputs[?OutputKey=='MskClusterArn'].OutputValue" --output text 2>/dev/null || echo "")
+MSK_BOOTSTRAP=""
+if [[ -n "${MSK_CLUSTER_ARN}" && "${MSK_CLUSTER_ARN}" != "None" ]]; then
+  MSK_BOOTSTRAP=$(aws kafka get-bootstrap-brokers --region "${REGION}" --cluster-arn "${MSK_CLUSTER_ARN}" \
+    --query 'BootstrapBrokerStringSaslIam' --output text 2>/dev/null || echo "")
+  echo "  MSK Bootstrap: ${MSK_BOOTSTRAP}"
+fi
+
 aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ecs \
   --template-file "${CFN_DIR}/ecs.yaml" \
   --capabilities CAPABILITY_NAMED_IAM \
@@ -155,7 +158,7 @@ aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ecs \
     "OrderProcessorImage=${ECS_IMAGE}" \
     "InventoryImage=${EC2_IMAGE}" \
     "PaymentEndpoint=${PAYMENT_ENDPOINT}" \
-    "OtelCollectorEndpoint=${OTEL_ENDPOINT}"
+    "MskBootstrap=${MSK_BOOTSTRAP}"
 
 ECS_ALB=$(aws cloudformation describe-stacks --stack-name otel-demo-ecs --region "${REGION}" \
   --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)

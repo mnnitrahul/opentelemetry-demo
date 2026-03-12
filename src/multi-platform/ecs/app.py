@@ -1,6 +1,8 @@
 """
 Order Processor - ECS Service
-Uses vanilla OpenTelemetry SDK. Sends OTLP to OTel Collector (via NLB).
+Uses vanilla OTel SDK → local collector sidecar → X-Ray.
+Calls Lambda via API Gateway, inventory service via ALB.
+Publishes order events to MSK Serverless.
 """
 import json
 import os
@@ -19,8 +21,6 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-from opentelemetry.propagate import set_global_textmap
-from opentelemetry.propagators.aws import AwsXRayPropagator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,27 +30,17 @@ TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'otel-demo-orders')
 BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', '')
 PAYMENT_URL = os.environ.get('PAYMENT_PROCESSOR_URL', '')
 INVENTORY_URL = os.environ.get('INVENTORY_SERVICE_URL', '')
+MSK_BOOTSTRAP = os.environ.get('MSK_BOOTSTRAP', '')
 
-# Set up OpenTelemetry with OTLP exporter
-resource = Resource.create({
-    "service.name": SERVICE_NAME,
-    "service.namespace": "otel-demo-multi"
-})
+# OTel SDK → local collector sidecar on localhost:4318
+resource = Resource.create({"service.name": SERVICE_NAME, "service.namespace": "otel-demo-multi"})
 provider = TracerProvider(resource=resource)
-otlp_endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
-if otlp_endpoint:
-    traces_endpoint = f"{otlp_endpoint}/v1/traces"
-    logger.info(f"OTLP traces endpoint: {traces_endpoint}")
-    exporter = OTLPSpanExporter(endpoint=traces_endpoint)
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+# Sidecar collector listens on localhost:4318
+exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
+provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
-
-# Use AWS X-Ray propagator for trace context across API Gateway
-set_global_textmap(AwsXRayPropagator())
-
 tracer = trace.get_tracer(SERVICE_NAME)
 
-# Auto-instrument libraries
 BotocoreInstrumentor().instrument()
 RequestsInstrumentor().instrument()
 
@@ -59,6 +49,30 @@ FlaskInstrumentor().instrument_app(app)
 
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+
+# MSK producer (optional)
+kafka_producer = None
+if MSK_BOOTSTRAP:
+    try:
+        from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
+        from kafka import KafkaProducer
+        import ssl
+
+        def msk_token_provider(config):
+            token, _ = MSKAuthTokenProvider.generate_auth_token(os.environ.get('AWS_REGION', 'us-east-1'))
+            return token
+
+        kafka_producer = KafkaProducer(
+            bootstrap_servers=MSK_BOOTSTRAP,
+            security_protocol='SASL_SSL',
+            sasl_mechanism='OAUTHBEARER',
+            sasl_oauth_token_provider=type('', (), {'token': staticmethod(msk_token_provider)})(),
+            ssl_context=ssl.create_default_context(),
+            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+        )
+        logger.info(f"MSK producer connected to {MSK_BOOTSTRAP}")
+    except Exception as e:
+        logger.warning(f"MSK producer setup failed: {e}")
 
 
 @app.route('/health')
@@ -72,20 +86,18 @@ def create_order():
     order_id = str(uuid.uuid4())
     steps = []
 
-    # Step 1: Write order to DynamoDB
+    # DynamoDB
     try:
         table = dynamodb.Table(TABLE_NAME)
         table.put_item(Item={
-            'orderId': order_id,
-            'status': 'CREATED',
-            'timestamp': str(int(time.time())),
-            'platform': 'ecs'
+            'orderId': order_id, 'status': 'CREATED',
+            'timestamp': str(int(time.time())), 'platform': 'ecs'
         })
         steps.append("dynamodb: order written")
     except Exception as e:
         steps.append(f"dynamodb: error - {e}")
 
-    # Step 2: Read from S3
+    # S3
     if BUCKET_NAME:
         try:
             s3_client.get_object(Bucket=BUCKET_NAME, Key='catalog.json')
@@ -93,7 +105,7 @@ def create_order():
         except Exception as e:
             steps.append(f"s3: {e}")
 
-    # Step 3: Call Lambda payment processor via API Gateway
+    # Lambda via API Gateway
     if PAYMENT_URL:
         try:
             resp = requests.post(PAYMENT_URL, json={
@@ -103,14 +115,28 @@ def create_order():
         except Exception as e:
             steps.append(f"payment: error - {e}")
 
-    # Step 4: Call EC2 inventory service via ALB
+    # Inventory via ALB
     if INVENTORY_URL:
         try:
-            resp = requests.get(
-                f"{INVENTORY_URL}/inventory?product_id=OLJCESPC7Z", timeout=10)
+            resp = requests.get(f"{INVENTORY_URL}/inventory?product_id=OLJCESPC7Z", timeout=10)
             steps.append(f"inventory: {resp.json()}")
         except Exception as e:
             steps.append(f"inventory: error - {e}")
+
+    # MSK publish
+    if kafka_producer:
+        try:
+            with tracer.start_as_current_span("msk.publish", attributes={
+                "messaging.system": "kafka", "messaging.operation": "publish",
+                "messaging.destination": "otel-demo-orders"
+            }):
+                kafka_producer.send('otel-demo-orders', {
+                    'orderId': order_id, 'status': 'CREATED', 'platform': 'ecs'
+                })
+                kafka_producer.flush(timeout=5)
+                steps.append("msk: order event published")
+        except Exception as e:
+            steps.append(f"msk: error - {e}")
 
     return jsonify({"orderId": order_id, "platform": "ecs", "steps": steps})
 

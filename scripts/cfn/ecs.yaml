@@ -1,17 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Multi-Platform Demo - ECS Fargate with order-processor and inventory-service
+Description: Multi-Platform Demo - ECS Fargate with collector sidecar
 
 Parameters:
   OrderProcessorImage:
     Type: String
-    Description: ECR image URI for order-processor
   InventoryImage:
     Type: String
-    Description: ECR image URI for inventory-service
   PaymentEndpoint:
     Type: String
     Default: ''
-  OtelCollectorEndpoint:
+  MskBootstrap:
     Type: String
     Default: ''
 
@@ -65,7 +63,6 @@ Resources:
       SecurityGroups:
         - !Ref AlbSG
 
-  # --- Order Processor Target Group ---
   OrderTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -75,11 +72,9 @@ Resources:
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckPath: /health
-      HealthCheckIntervalSeconds: 30
       Matcher:
         HttpCode: '200'
 
-  # --- Inventory Service Target Group ---
   InventoryTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -89,11 +84,9 @@ Resources:
       VpcId: !ImportValue OtelDemoVpcId
       TargetType: ip
       HealthCheckPath: /health
-      HealthCheckIntervalSeconds: 30
       Matcher:
         HttpCode: '200'
 
-  # --- ALB Listener with path-based routing ---
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -116,15 +109,15 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref InventoryTargetGroup
 
-  # --- Order Processor Task ---
+  # --- Order Processor (app + collector sidecar) ---
   OrderTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: otel-demo-order-processor
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '512'
+      Memory: '1024'
       TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
       ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
       ContainerDefinitions:
@@ -138,16 +131,12 @@ Resources:
             Options:
               awslogs-group: !Ref OrderLogGroup
               awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
+              awslogs-stream-prefix: app
           Environment:
             - Name: SERVICE_PORT
               Value: '8080'
             - Name: OTEL_SERVICE_NAME
               Value: multi-order-processor
-            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Ref OtelCollectorEndpoint
-            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
-              Value: http/protobuf
             - Name: DYNAMODB_TABLE_NAME
               Value: !ImportValue OtelDemoOrdersTableName
             - Name: S3_BUCKET_NAME
@@ -156,8 +145,52 @@ Resources:
               Value: !Ref PaymentEndpoint
             - Name: INVENTORY_SERVICE_URL
               Value: !Sub http://${Alb.DNSName}
+            - Name: MSK_BOOTSTRAP
+              Value: !Ref MskBootstrap
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+        - Name: otel-collector
+          Image: public.ecr.aws/aws-observability/aws-otel-collector:latest
+          Essential: false
+          Command: ["--config", "env:OTEL_CONFIG"]
+          PortMappings:
+            - ContainerPort: 4318
+            - ContainerPort: 4317
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref OrderLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: collector
+          Environment:
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: OTEL_CONFIG
+              Value: |
+                receivers:
+                  otlp:
+                    protocols:
+                      http:
+                        endpoint: 0.0.0.0:4318
+                      grpc:
+                        endpoint: 0.0.0.0:4317
+                extensions:
+                  sigv4auth:
+                    region: ${AWS_REGION}
+                    service: xray
+                exporters:
+                  otlphttp/xray:
+                    endpoint: https://xray.${AWS_REGION}.amazonaws.com
+                    auth:
+                      authenticator: sigv4auth
+                  debug:
+                    verbosity: basic
+                service:
+                  extensions: [sigv4auth]
+                  pipelines:
+                    traces:
+                      receivers: [otlp]
+                      exporters: [otlphttp/xray, debug]
 
   OrderService:
     Type: AWS::ECS::Service
@@ -181,15 +214,15 @@ Resources:
           ContainerPort: 8080
           TargetGroupArn: !Ref OrderTargetGroup
 
-  # --- Inventory Service Task ---
+  # --- Inventory Service (app + collector sidecar) ---
   InventoryTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: otel-demo-inventory-service
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '512'
+      Memory: '1024'
       TaskRoleArn: !ImportValue OtelDemoEcsTaskRoleArn
       ExecutionRoleArn: !ImportValue OtelDemoEcsExecutionRoleArn
       ContainerDefinitions:
@@ -203,22 +236,60 @@ Resources:
             Options:
               awslogs-group: !Ref InventoryLogGroup
               awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
+              awslogs-stream-prefix: app
           Environment:
             - Name: SERVICE_PORT
               Value: '8080'
             - Name: OTEL_SERVICE_NAME
               Value: multi-inventory-service
-            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Ref OtelCollectorEndpoint
-            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
-              Value: http/protobuf
             - Name: VALKEY_ADDR
               Value: !ImportValue OtelDemoValkeyEndpoint
             - Name: S3_BUCKET_NAME
               Value: !ImportValue OtelDemoAssetsBucketName
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+        - Name: otel-collector
+          Image: public.ecr.aws/aws-observability/aws-otel-collector:latest
+          Essential: false
+          Command: ["--config", "env:OTEL_CONFIG"]
+          PortMappings:
+            - ContainerPort: 4318
+            - ContainerPort: 4317
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref InventoryLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: collector
+          Environment:
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: OTEL_CONFIG
+              Value: |
+                receivers:
+                  otlp:
+                    protocols:
+                      http:
+                        endpoint: 0.0.0.0:4318
+                      grpc:
+                        endpoint: 0.0.0.0:4317
+                extensions:
+                  sigv4auth:
+                    region: ${AWS_REGION}
+                    service: xray
+                exporters:
+                  otlphttp/xray:
+                    endpoint: https://xray.${AWS_REGION}.amazonaws.com
+                    auth:
+                      authenticator: sigv4auth
+                  debug:
+                    verbosity: basic
+                service:
+                  extensions: [sigv4auth]
+                  pipelines:
+                    traces:
+                      receivers: [otlp]
+                      exporters: [otlphttp/xray, debug]
 
   InventoryService:
     Type: AWS::ECS::Service
@@ -244,17 +315,14 @@ Resources:
 
 Outputs:
   AlbDnsName:
-    Description: ECS ALB DNS
     Value: !GetAtt Alb.DNSName
     Export:
       Name: OtelDemoEcsAlbDns
   OrderProcessorEndpoint:
-    Description: Order processor URL
     Value: !Sub http://${Alb.DNSName}/order
     Export:
       Name: OtelDemoOrderProcessorEndpoint
   InventoryEndpoint:
-    Description: Inventory service URL
     Value: !Sub http://${Alb.DNSName}/inventory
     Export:
       Name: OtelDemoInventoryEndpoint

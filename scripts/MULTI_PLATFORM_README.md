@@ -220,3 +220,49 @@ All multi-platform services use `service.namespace=otel-demo-multi`:
 ## Troubleshooting
 
 See the troubleshooting section in `scripts/README.md`.
+
+## Limitations and Design Decisions
+
+### Shared OTel Collector for X-Ray Export
+
+All services (EKS, ECS, EC2) send OTLP to a single OTel Collector
+running on the EKS cluster, exposed via an internal NLB. The collector
+handles sigv4 authentication for X-Ray export using IRSA credentials.
+
+**Why:** X-Ray's OTLP endpoint requires AWS Signature V4 on every
+request. The vanilla OTel SDK doesn't support sigv4 natively. Rather
+than adding AWS-specific auth to each service, the collector centralizes
+it. The `sigv4auth` extension is open-source (OTel Collector Contrib).
+
+**Alternative:** Run a collector sidecar on each ECS task and EC2
+instance with its own IAM role. This adds complexity but removes the
+NLB dependency.
+
+### Lambda Uses X-Ray SDK (Not OTel SDK)
+
+Lambda functions use the AWS X-Ray SDK instead of vanilla OTel SDK
+because Lambda has built-in X-Ray support and cannot reach the
+external OTel Collector. The X-Ray SDK auto-patches boto3 calls and
+uses Lambda's built-in X-Ray daemon.
+
+### Helm Chart OTEL_SERVICE_NAME Override
+
+The OTel Demo Helm chart sets `OTEL_SERVICE_NAME` via Kubernetes
+`fieldRef` (pod label). This cannot be overridden via `envOverrides`
+without creating duplicate env keys. The workaround is `useDefault.env: false`
+with complete env blocks for every service — verbose but the only way
+to set custom service names.
+
+### MSK Serverless Not Used
+
+MSK Serverless requires IAM auth + TLS which the demo's Kafka clients
+(Go Sarama, Java) don't support without code changes. Kafka runs as
+an in-cluster pod instead. MSK Serverless infrastructure exists in the
+shared CFN stack but is unused.
+
+### ElastiCache Serverless Requires TLS
+
+ElastiCache Serverless (Valkey) requires TLS connections. The Python
+Redis client supports this with `ssl=True`. The EKS cart service uses
+the in-cluster valkey-cart pod (no TLS) while the ECS inventory service
+connects to ElastiCache Serverless with TLS.
