@@ -186,6 +186,44 @@ Resources:
       BatchSize: 100
       Enabled: true
 
+  # --- MSK Consumer Lambda ---
+  MskConsumerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-msk-consumer
+      Runtime: python3.12
+      Handler: msk_consumer.handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - arn:aws:lambda:us-east-1:615299751070:layer:AWSOpenTelemetryDistroPython:14
+      VpcConfig:
+        SubnetIds:
+          - !ImportValue OtelDemoPrivateSubnet1
+          - !ImportValue OtelDemoPrivateSubnet2
+        SecurityGroupIds:
+          - !ImportValue OtelDemoLambdaSG
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-instrument
+          OTEL_SERVICE_NAME: multi-msk-consumer
+
+  MskEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue OtelDemoMskClusterArn
+      FunctionName: !Ref MskConsumerFunction
+      Topics:
+        - otel-demo-orders
+      StartingPosition: LATEST
+
 Outputs:
   ApiGatewayUrl:
     Description: REST API Gateway URL

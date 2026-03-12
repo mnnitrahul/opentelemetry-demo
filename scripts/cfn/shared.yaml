@@ -613,6 +613,11 @@ Resources:
           ToPort: 9098
           SourceSecurityGroupId: !Ref EksClusterSG
           Description: Kafka from EKS
+        - IpProtocol: tcp
+          FromPort: 9098
+          ToPort: 9098
+          SourceSecurityGroupId: !Ref LambdaSG
+          Description: Kafka from Lambda
       Tags:
         - Key: Name
           Value: otel-demo-msk-sg

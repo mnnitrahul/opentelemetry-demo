@@ -118,6 +118,7 @@ Each task has an OTel Collector Contrib sidecar with sigv4auth -> X-Ray.
 | SQS Consumer | multi-sqs-consumer | SQS queue (otel-demo-order-queue) |
 | SNS Consumer | multi-sns-consumer | SNS topic (otel-demo-order-topic) |
 | Kinesis Consumer | multi-kinesis-consumer | Kinesis stream (otel-demo-order-stream) |
+| MSK Consumer | multi-msk-consumer | MSK Serverless topic (otel-demo-orders) |
 
 All use ADOT Python layer + X-Ray SDK for Application Signals.
 
