@@ -84,8 +84,15 @@ echo "  Uploaded to s3://${LAMBDA_BUCKET}/lambda/payment_processor.zip"
 echo ""
 echo "[4/5] Deploying CFN stacks..."
 
-# Get OTel Collector endpoint (internal NLB or direct)
-OTEL_ENDPOINT="https://xray.${REGION}.amazonaws.com"
+# Get OTel Collector endpoint (internal NLB on the multi EKS cluster)
+COLLECTOR_NLB=$(kubectl get svc otel-collector-nlb -n otel-demo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+if [[ -n "${COLLECTOR_NLB}" ]]; then
+  OTEL_ENDPOINT="http://${COLLECTOR_NLB}:4318"
+  echo "  OTel Collector NLB: ${OTEL_ENDPOINT}"
+else
+  OTEL_ENDPOINT=""
+  echo "  Warning: OTel Collector NLB not found. Traces will not be exported."
+fi
 VALKEY_ENDPOINT=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --region "${REGION}" \
   --query "Stacks[0].Outputs[?OutputKey=='ValkeyEndpoint'].OutputValue" --output text 2>/dev/null || echo "")
 S3_BUCKET=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --region "${REGION}" \

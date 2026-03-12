@@ -97,11 +97,7 @@ Resources:
             ECR_REGISTRY=$(echo "${InventoryImage}" | cut -d/ -f1)
             aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${!ECR_REGISTRY}
             docker pull ${InventoryImage}
-            # Run X-Ray daemon sidecar
-            docker run -d --restart always --name xray-daemon \
-              -p 2000:2000/udp \
-              public.ecr.aws/xray/aws-xray-daemon:latest
-            # Run inventory service
+            # Run inventory service (sends OTLP to OTel Collector via NLB)
             docker run -d --restart always --name inventory -p 8080:8080 \
               -e SERVICE_PORT=8080 \
               -e OTEL_SERVICE_NAME=multi-inventory-service \

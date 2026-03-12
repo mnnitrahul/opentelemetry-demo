@@ -382,6 +382,33 @@ kubectl annotate serviceaccount otel-collector -n "${NAMESPACE}" \
   --overwrite 2>/dev/null || true
 kubectl rollout restart daemonset/otel-collector-agent -n "${NAMESPACE}" 2>/dev/null || true
 
+# Create internal NLB for OTel Collector (so ECS/EC2 can send OTLP)
+echo "  Creating OTel Collector NLB..."
+cat <<NLBEOF | kubectl apply -f - 2>/dev/null || true
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-nlb
+  namespace: ${NAMESPACE}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: otel-demo-otelcol
+    app.kubernetes.io/component: agent-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+NLBEOF
+
 echo ""
 echo "============================================"
 echo " Multi-Platform EKS Deployment Complete!"

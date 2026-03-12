@@ -1,6 +1,6 @@
 """
 Order Processor - ECS Service
-Uses AWS X-Ray SDK for tracing (auto-signs with task IAM role).
+Uses vanilla OpenTelemetry SDK. Sends OTLP to OTel Collector (via NLB).
 """
 import json
 import os
@@ -11,8 +11,16 @@ import logging
 import boto3
 import requests
 from flask import Flask, request, jsonify
-from aws_xray_sdk.core import xray_recorder, patch_all
-from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.propagators.aws import AwsXRayPropagator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,12 +31,29 @@ BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', '')
 PAYMENT_URL = os.environ.get('PAYMENT_PROCESSOR_URL', '')
 INVENTORY_URL = os.environ.get('INVENTORY_SERVICE_URL', '')
 
-# Configure X-Ray
-xray_recorder.configure(service=SERVICE_NAME)
-patch_all()
+# Set up OpenTelemetry with OTLP exporter
+resource = Resource.create({
+    "service.name": SERVICE_NAME,
+    "service.namespace": "otel-demo-multi"
+})
+provider = TracerProvider(resource=resource)
+otlp_endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
+if otlp_endpoint:
+    exporter = OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces")
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+
+# Use AWS X-Ray propagator for trace context across API Gateway
+set_global_textmap(AwsXRayPropagator())
+
+tracer = trace.get_tracer(SERVICE_NAME)
+
+# Auto-instrument libraries
+BotocoreInstrumentor().instrument()
+RequestsInstrumentor().instrument()
 
 app = Flask(__name__)
-XRayMiddleware(app, xray_recorder)
+FlaskInstrumentor().instrument_app(app)
 
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
@@ -66,7 +91,7 @@ def create_order():
         except Exception as e:
             steps.append(f"s3: {e}")
 
-    # Step 3: Call Lambda payment processor
+    # Step 3: Call Lambda payment processor via API Gateway
     if PAYMENT_URL:
         try:
             resp = requests.post(PAYMENT_URL, json={
@@ -76,10 +101,11 @@ def create_order():
         except Exception as e:
             steps.append(f"payment: error - {e}")
 
-    # Step 4: Call EC2 inventory service
+    # Step 4: Call EC2 inventory service via ALB
     if INVENTORY_URL:
         try:
-            resp = requests.get(f"{INVENTORY_URL}/inventory?product_id=OLJCESPC7Z", timeout=10)
+            resp = requests.get(
+                f"{INVENTORY_URL}/inventory?product_id=OLJCESPC7Z", timeout=10)
             steps.append(f"inventory: {resp.json()}")
         except Exception as e:
             steps.append(f"inventory: error - {e}")
