@@ -100,6 +100,21 @@ echo "  Uploaded to s3://${LAMBDA_BUCKET}/lambda/payment_processor.zip"
 echo ""
 echo "[4/5] Deploying CFN stacks..."
 
+# Helper: wait for stack if it's being deleted
+wait_for_stack_delete() {
+  local stack_name="$1"
+  local status
+  status=$(aws cloudformation describe-stacks --stack-name "${stack_name}" --region "${REGION}" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+  if [[ "${status}" == "DELETE_IN_PROGRESS" ]]; then
+    echo "  Waiting for ${stack_name} deletion to complete..."
+    aws cloudformation wait stack-delete-complete --stack-name "${stack_name}" --region "${REGION}" 2>/dev/null || true
+  elif [[ "${status}" == "ROLLBACK_COMPLETE" || "${status}" == "ROLLBACK_FAILED" ]]; then
+    echo "  Deleting ${stack_name} (${status})..."
+    aws cloudformation delete-stack --stack-name "${stack_name}" --region "${REGION}"
+    aws cloudformation wait stack-delete-complete --stack-name "${stack_name}" --region "${REGION}" 2>/dev/null || true
+  fi
+}
+
 # Get OTel Collector endpoint (internal NLB on the multi EKS cluster)
 COLLECTOR_NLB=$(kubectl get svc otel-collector-nlb -n otel-demo -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 if [[ -n "${COLLECTOR_NLB}" ]]; then
@@ -116,6 +131,7 @@ S3_BUCKET=$(aws cloudformation describe-stacks --stack-name otel-demo-shared --r
 
 # Deploy Lambda stack
 echo "  Deploying Lambda stack..."
+wait_for_stack_delete "otel-demo-lambda"
 aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-lambda \
   --template-file "${CFN_DIR}/lambda.yaml" \
   --capabilities CAPABILITY_NAMED_IAM \
@@ -130,6 +146,7 @@ echo "  Payment endpoint: ${PAYMENT_ENDPOINT}"
 
 # Deploy ECS stack (both order-processor and inventory-service)
 echo "  Deploying ECS stack..."
+wait_for_stack_delete "otel-demo-ecs"
 aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ecs \
   --template-file "${CFN_DIR}/ecs.yaml" \
   --capabilities CAPABILITY_NAMED_IAM \
