@@ -250,17 +250,17 @@ Resources:
                   - kafka-cluster:AlterGroup
                   - kafka-cluster:DescribeGroup
                 Resource: '*'
-              - Sid: SNSPublish
+              - Sid: EcsSNSPublish
                 Effect: Allow
                 Action:
                   - sns:Publish
                 Resource: '*'
-              - Sid: SQSSend
+              - Sid: EcsSQSSend
                 Effect: Allow
                 Action:
                   - sqs:SendMessage
                 Resource: '*'
-              - Sid: KinesisPut
+              - Sid: EcsKinesisPut
                 Effect: Allow
                 Action:
                   - kinesis:PutRecord
