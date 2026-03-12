@@ -128,24 +128,7 @@ PAYMENT_ENDPOINT=$(aws cloudformation describe-stacks --stack-name otel-demo-lam
   --query "Stacks[0].Outputs[?OutputKey=='PaymentEndpoint'].OutputValue" --output text)
 echo "  Payment endpoint: ${PAYMENT_ENDPOINT}"
 
-# Deploy EC2 stack
-echo "  Deploying EC2 stack..."
-aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ec2 \
-  --template-file "${CFN_DIR}/ec2-asg.yaml" \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --no-fail-on-empty-changeset \
-  --parameter-overrides \
-    "InventoryImage=${EC2_IMAGE}" \
-    "OtelCollectorEndpoint=${OTEL_ENDPOINT}" \
-    "ValkeyAddr=${VALKEY_ENDPOINT}" \
-    "S3BucketName=${S3_BUCKET}"
-
-EC2_ALB=$(aws cloudformation describe-stacks --stack-name otel-demo-ec2 --region "${REGION}" \
-  --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
-INVENTORY_ENDPOINT="http://${EC2_ALB}"
-echo "  Inventory endpoint: ${INVENTORY_ENDPOINT}"
-
-# Deploy ECS stack
+# Deploy ECS stack (both order-processor and inventory-service)
 echo "  Deploying ECS stack..."
 aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ecs \
   --template-file "${CFN_DIR}/ecs.yaml" \
@@ -153,13 +136,14 @@ aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ecs \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
     "OrderProcessorImage=${ECS_IMAGE}" \
+    "InventoryImage=${EC2_IMAGE}" \
     "PaymentEndpoint=${PAYMENT_ENDPOINT}" \
-    "InventoryEndpoint=${INVENTORY_ENDPOINT}" \
     "OtelCollectorEndpoint=${OTEL_ENDPOINT}"
 
 ECS_ALB=$(aws cloudformation describe-stacks --stack-name otel-demo-ecs --region "${REGION}" \
   --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
 echo "  Order processor: http://${ECS_ALB}/order"
+echo "  Inventory: http://${ECS_ALB}/inventory"
 
 # ---------------------------------------------------------------------------
 # Step 5: Upload sample catalog to S3
@@ -204,7 +188,7 @@ spec:
         - name: LAMBDA_PAYMENT_URL
           value: ${PAYMENT_ENDPOINT}
         - name: EC2_INVENTORY_URL
-          value: http://${EC2_ALB}/inventory
+          value: http://${ECS_ALB}/inventory
 CALLEREOF
 
 kubectl apply -f /tmp/caller.yaml 2>/dev/null || echo "  Warning: could not deploy caller pod"
