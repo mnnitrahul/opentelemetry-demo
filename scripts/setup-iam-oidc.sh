@@ -211,6 +211,22 @@ POLICY_DOC=$(cat <<'EOF'
       "Resource": "*"
     },
     {
+      "Sid": "SNS",
+      "Effect": "Allow",
+      "Action": [
+        "sns:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Kinesis",
+      "Effect": "Allow",
+      "Action": [
+        "kinesis:*"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "DynamoDB",
       "Effect": "Allow",
       "Action": [
