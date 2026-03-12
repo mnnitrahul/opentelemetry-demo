@@ -58,6 +58,22 @@ docker push "${EC2_IMAGE}" 2>&1
 echo "  Pushed: ${EC2_IMAGE}"
 
 # ---------------------------------------------------------------------------
+# Step 2b: Build and push caller image
+# ---------------------------------------------------------------------------
+echo ""
+echo "  Building caller service..."
+CALLER_REPO="otel-demo-multi/caller"
+CALLER_IMAGE="${ECR_REGISTRY}/${CALLER_REPO}:latest"
+
+if ! aws ecr describe-repositories --repository-names "${CALLER_REPO}" --region "${REGION}" > /dev/null 2>&1; then
+  aws ecr create-repository --repository-name "${CALLER_REPO}" --region "${REGION}" --no-cli-pager > /dev/null
+fi
+
+docker build -t "${CALLER_IMAGE}" "${REPO_ROOT}/src/multi-platform/caller/" 2>&1
+docker push "${CALLER_IMAGE}" 2>&1
+echo "  Pushed: ${CALLER_IMAGE}"
+
+# ---------------------------------------------------------------------------
 # Step 3: Package and upload Lambda function
 # ---------------------------------------------------------------------------
 echo ""
@@ -177,25 +193,21 @@ spec:
     spec:
       containers:
       - name: caller
-        image: curlimages/curl:latest
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          while true; do
-            echo "--- Calling ECS order-processor ---"
-            curl -s --max-time 15 http://${ECS_ALB}/order
-            echo ""
-            echo "--- Calling Lambda payment-processor ---"
-            curl -s --max-time 10 -X POST ${PAYMENT_ENDPOINT} -H 'Content-Type: application/json' -d '{"order_id":"auto","amount":9.99}'
-            echo ""
-            echo "--- Calling EC2 inventory-service ---"
-            curl -s --max-time 10 http://${EC2_ALB}/inventory
-            echo ""
-            sleep 30
-          done
+        image: ${CALLER_IMAGE}
+        env:
+        - name: OTEL_SERVICE_NAME
+          value: multi-platform-caller
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-collector:4317
+        - name: ECS_ORDER_URL
+          value: http://${ECS_ALB}/order
+        - name: LAMBDA_PAYMENT_URL
+          value: ${PAYMENT_ENDPOINT}
+        - name: EC2_INVENTORY_URL
+          value: http://${EC2_ALB}/inventory
 CALLEREOF
 
-kubectl apply -f /tmp/caller.yaml 2>/dev/null || echo "  Warning: could not deploy caller pod (kubectl not configured for multi cluster)"
+kubectl apply -f /tmp/caller.yaml 2>/dev/null || echo "  Warning: could not deploy caller pod"
 
 echo ""
 echo "============================================"
