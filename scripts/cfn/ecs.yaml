@@ -137,6 +137,8 @@ Resources:
               Value: '8080'
             - Name: OTEL_SERVICE_NAME
               Value: multi-order-processor
+            - Name: OTEL_PROPAGATORS
+              Value: xray,tracecontext,baggage
             - Name: DYNAMODB_TABLE_NAME
               Value: !ImportValue OtelDemoOrdersTableName
             - Name: S3_BUCKET_NAME
