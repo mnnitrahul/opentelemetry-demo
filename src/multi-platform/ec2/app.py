@@ -17,6 +17,10 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.propagators.composite import CompositePropagator
+from opentelemetry.trace.propagation import TraceContextTextMapPropagator
+from opentelemetry.baggage.propagation import W3CBaggagePropagator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,13 +35,11 @@ resource = Resource.create({
     "service.namespace": "otel-demo-multi"
 })
 provider = TracerProvider(resource=resource)
-otlp_endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
-if otlp_endpoint:
-    traces_endpoint = f"{otlp_endpoint}/v1/traces"
-    logger.info(f"OTLP traces endpoint: {traces_endpoint}")
-    exporter = OTLPSpanExporter(endpoint=traces_endpoint)
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+# Send to local collector sidecar
+exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
+provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
+set_global_textmap(CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()]))
 tracer = trace.get_tracer(SERVICE_NAME)
 
 # Auto-instrument libraries
