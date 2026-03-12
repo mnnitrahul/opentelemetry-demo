@@ -81,6 +81,99 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*
 
+
+  # --- SQS Consumer Lambda ---
+  SqsConsumerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-sqs-consumer
+      Runtime: python3.12
+      Handler: sqs_consumer.handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: 30
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          OTEL_SERVICE_NAME: multi-sqs-consumer
+
+  SqsEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue OtelDemoOrderQueueArn
+      FunctionName: !Ref SqsConsumerFunction
+      BatchSize: 10
+      Enabled: true
+
+  # --- SNS Consumer Lambda ---
+  SnsConsumerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-sns-consumer
+      Runtime: python3.12
+      Handler: sns_consumer.handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: 30
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          OTEL_SERVICE_NAME: multi-sns-consumer
+
+  SnsConsumerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SnsConsumerFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !ImportValue OtelDemoOrderTopicArn
+
+  SnsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !ImportValue OtelDemoOrderTopicArn
+      Protocol: lambda
+      Endpoint: !GetAtt SnsConsumerFunction.Arn
+
+  # --- Kinesis Consumer Lambda ---
+  KinesisConsumerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: otel-demo-kinesis-consumer
+      Runtime: python3.12
+      Handler: kinesis_consumer.handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Role: !ImportValue OtelDemoLambdaRoleArn
+      Timeout: 30
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !ImportValue OtelDemoOrdersTableName
+          OTEL_SERVICE_NAME: multi-kinesis-consumer
+
+  KinesisEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue OtelDemoOrderStreamArn
+      FunctionName: !Ref KinesisConsumerFunction
+      StartingPosition: LATEST
+      BatchSize: 100
+      Enabled: true
+
 Outputs:
   ApiGatewayUrl:
     Description: REST API Gateway URL
@@ -92,3 +185,4 @@ Outputs:
     Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/payment
     Export:
       Name: OtelDemoPaymentEndpoint
+

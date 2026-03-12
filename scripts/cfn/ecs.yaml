@@ -147,6 +147,12 @@ Resources:
               Value: !Sub http://${Alb.DNSName}
             - Name: MSK_BOOTSTRAP
               Value: !Ref MskBootstrap
+            - Name: SNS_TOPIC_ARN
+              Value: !ImportValue OtelDemoOrderTopicArn
+            - Name: SQS_QUEUE_URL
+              Value: !ImportValue OtelDemoOrderQueueUrl
+            - Name: KINESIS_STREAM_NAME
+              Value: !ImportValue OtelDemoOrderStreamName
             - Name: AWS_REGION
               Value: !Ref AWS::Region
         - Name: otel-collector

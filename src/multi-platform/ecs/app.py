@@ -1,17 +1,5 @@
-"""
-Order Processor - ECS Service
-Uses vanilla OTel SDK → local collector sidecar → X-Ray.
-Calls Lambda via API Gateway, inventory service via ALB.
-Publishes order events to MSK Serverless.
-"""
-import json
-import os
-import uuid
-import time
-import logging
-
-import boto3
-import requests
+"""Order Processor - ECS Service with OTel SDK + collector sidecar."""
+import json, os, uuid, time, logging, boto3, requests
 from flask import Flask, request, jsonify
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -30,12 +18,13 @@ TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'otel-demo-orders')
 BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', '')
 PAYMENT_URL = os.environ.get('PAYMENT_PROCESSOR_URL', '')
 INVENTORY_URL = os.environ.get('INVENTORY_SERVICE_URL', '')
-MSK_BOOTSTRAP = os.environ.get('MSK_BOOTSTRAP', '')
+SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN', '')
+SQS_QUEUE_URL = os.environ.get('SQS_QUEUE_URL', '')
+KINESIS_STREAM = os.environ.get('KINESIS_STREAM_NAME', '')
+REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
-# OTel SDK → local collector sidecar on localhost:4318
 resource = Resource.create({"service.name": SERVICE_NAME, "service.namespace": "otel-demo-multi"})
 provider = TracerProvider(resource=resource)
-# Sidecar collector listens on localhost:4318
 exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
 provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
@@ -47,55 +36,29 @@ RequestsInstrumentor().instrument()
 app = Flask(__name__)
 FlaskInstrumentor().instrument_app(app)
 
-dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
-s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
-
-# MSK producer (optional)
-kafka_producer = None
-if MSK_BOOTSTRAP:
-    try:
-        from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
-        from kafka import KafkaProducer
-        import ssl
-
-        def msk_token_provider(config):
-            token, _ = MSKAuthTokenProvider.generate_auth_token(os.environ.get('AWS_REGION', 'us-east-1'))
-            return token
-
-        kafka_producer = KafkaProducer(
-            bootstrap_servers=MSK_BOOTSTRAP,
-            security_protocol='SASL_SSL',
-            sasl_mechanism='OAUTHBEARER',
-            sasl_oauth_token_provider=type('', (), {'token': staticmethod(msk_token_provider)})(),
-            ssl_context=ssl.create_default_context(),
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-        )
-        logger.info(f"MSK producer connected to {MSK_BOOTSTRAP}")
-    except Exception as e:
-        logger.warning(f"MSK producer setup failed: {e}")
-
+dynamodb = boto3.resource('dynamodb', region_name=REGION)
+sns = boto3.client('sns', region_name=REGION)
+sqs = boto3.client('sqs', region_name=REGION)
+kinesis = boto3.client('kinesis', region_name=REGION)
+s3_client = boto3.client('s3', region_name=REGION)
 
 @app.route('/health')
 @app.route('/')
 def health():
     return jsonify({"status": "ok", "service": SERVICE_NAME, "platform": "ecs"})
 
-
 @app.route('/order', methods=['GET', 'POST'])
 def create_order():
     order_id = str(uuid.uuid4())
+    order_data = {"orderId": order_id, "status": "CREATED", "platform": "ecs", "timestamp": str(int(time.time()))}
     steps = []
 
     # DynamoDB
     try:
-        table = dynamodb.Table(TABLE_NAME)
-        table.put_item(Item={
-            'orderId': order_id, 'status': 'CREATED',
-            'timestamp': str(int(time.time())), 'platform': 'ecs'
-        })
+        dynamodb.Table(TABLE_NAME).put_item(Item=order_data)
         steps.append("dynamodb: order written")
     except Exception as e:
-        steps.append(f"dynamodb: error - {e}")
+        steps.append(f"dynamodb: {e}")
 
     # S3
     if BUCKET_NAME:
@@ -108,38 +71,44 @@ def create_order():
     # Lambda via API Gateway
     if PAYMENT_URL:
         try:
-            resp = requests.post(PAYMENT_URL, json={
-                "order_id": order_id, "amount": 42.99, "currency": "USD"
-            }, timeout=10)
-            steps.append(f"payment: {resp.json()}")
+            resp = requests.post(PAYMENT_URL, json={"order_id": order_id, "amount": 42.99}, timeout=10)
+            steps.append(f"payment: {resp.status_code}")
         except Exception as e:
-            steps.append(f"payment: error - {e}")
+            steps.append(f"payment: {e}")
 
     # Inventory via ALB
     if INVENTORY_URL:
         try:
             resp = requests.get(f"{INVENTORY_URL}/inventory?product_id=OLJCESPC7Z", timeout=10)
-            steps.append(f"inventory: {resp.json()}")
+            steps.append(f"inventory: {resp.status_code}")
         except Exception as e:
-            steps.append(f"inventory: error - {e}")
+            steps.append(f"inventory: {e}")
 
-    # MSK publish
-    if kafka_producer:
+    # SNS
+    if SNS_TOPIC_ARN:
         try:
-            with tracer.start_as_current_span("msk.publish", attributes={
-                "messaging.system": "kafka", "messaging.operation": "publish",
-                "messaging.destination": "otel-demo-orders"
-            }):
-                kafka_producer.send('otel-demo-orders', {
-                    'orderId': order_id, 'status': 'CREATED', 'platform': 'ecs'
-                })
-                kafka_producer.flush(timeout=5)
-                steps.append("msk: order event published")
+            sns.publish(TopicArn=SNS_TOPIC_ARN, Message=json.dumps(order_data), Subject="OrderCreated")
+            steps.append("sns: published")
         except Exception as e:
-            steps.append(f"msk: error - {e}")
+            steps.append(f"sns: {e}")
+
+    # SQS (direct, separate from SNS subscription)
+    if SQS_QUEUE_URL:
+        try:
+            sqs.send_message(QueueUrl=SQS_QUEUE_URL, MessageBody=json.dumps(order_data))
+            steps.append("sqs: sent")
+        except Exception as e:
+            steps.append(f"sqs: {e}")
+
+    # Kinesis
+    if KINESIS_STREAM:
+        try:
+            kinesis.put_record(StreamName=KINESIS_STREAM, Data=json.dumps(order_data).encode(), PartitionKey=order_id)
+            steps.append("kinesis: put record")
+        except Exception as e:
+            steps.append(f"kinesis: {e}")
 
     return jsonify({"orderId": order_id, "platform": "ecs", "steps": steps})
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('SERVICE_PORT', '8080'))
