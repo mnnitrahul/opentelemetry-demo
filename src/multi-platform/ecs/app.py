@@ -9,8 +9,6 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-from opentelemetry.propagate import set_global_textmap
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +28,6 @@ provider = TracerProvider(resource=resource)
 exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
 provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
-set_global_textmap(TraceContextTextMapPropagator())
 tracer = trace.get_tracer(SERVICE_NAME)
 
 BotocoreInstrumentor().instrument()
