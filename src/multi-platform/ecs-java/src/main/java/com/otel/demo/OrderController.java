@@ -119,7 +119,7 @@ public class OrderController {
         return Map.of("status", "ok", "service", "multi-order-processor-java", "platform", "ecs");
     }
 
-    @RequestMapping(value = "/order", method = {RequestMethod.GET, RequestMethod.POST})
+    @RequestMapping(value = {"/order", "/order-java"}, method = {RequestMethod.GET, RequestMethod.POST})
     public ResponseEntity<Map<String, Object>> createOrder() {
         String orderId = UUID.randomUUID().toString();
         String timestamp = String.valueOf(Instant.now().getEpochSecond());

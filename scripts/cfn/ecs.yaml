@@ -484,6 +484,12 @@ Resources:
                     traces:
                       receivers: [otlp]
                       exporters: [otlphttp/xray, debug]
+                    metrics:
+                      receivers: [otlp]
+                      exporters: [debug]
+                    logs:
+                      receivers: [otlp]
+                      exporters: [debug]
 
   JavaService:
     Type: AWS::ECS::Service
