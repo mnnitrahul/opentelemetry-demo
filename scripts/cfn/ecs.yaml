@@ -139,6 +139,8 @@ Resources:
               Value: multi-order-processor
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: http://localhost:4318
+            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
+              Value: http/protobuf
             - Name: OTEL_PROPAGATORS
               Value: xray,tracecontext,baggage
             - Name: DYNAMODB_TABLE_NAME
@@ -264,6 +266,8 @@ Resources:
               Value: multi-inventory-service
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: http://localhost:4318
+            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
+              Value: http/protobuf
             - Name: OTEL_PROPAGATORS
               Value: xray,tracecontext,baggage
             - Name: VALKEY_ADDR
