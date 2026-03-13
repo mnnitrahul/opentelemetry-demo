@@ -1,22 +1,8 @@
-"""
-Inventory Service - EC2/ASG Service
-Uses vanilla OpenTelemetry SDK. Sends OTLP to OTel Collector (via NLB).
-"""
-import json
-import os
-import logging
-
-import boto3
-import redis
+"""Inventory Service - ECS Service with vanilla OTel auto-instrumentation."""
+import json, os, logging
+import boto3, redis
 from flask import Flask, request, jsonify
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-from opentelemetry.instrumentation.redis import RedisInstrumentor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,24 +11,9 @@ SERVICE_NAME = os.environ.get('OTEL_SERVICE_NAME', 'multi-inventory-service')
 VALKEY_ADDR = os.environ.get('VALKEY_ADDR', '')
 BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', '')
 
-# Set up OpenTelemetry with OTLP exporter
-resource = Resource.create({
-    "service.name": SERVICE_NAME,
-    "service.namespace": "otel-demo-multi"
-})
-provider = TracerProvider(resource=resource)
-# Send to local collector sidecar
-exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
-provider.add_span_processor(BatchSpanProcessor(exporter))
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer(SERVICE_NAME)
-
-# Auto-instrument libraries
-BotocoreInstrumentor().instrument()
-RedisInstrumentor().instrument()
+tracer = trace.get_tracer(__name__)
 
 app = Flask(__name__)
-FlaskInstrumentor().instrument_app(app)
 
 s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 redis_client = None
@@ -55,12 +26,10 @@ if VALKEY_ADDR:
     except Exception as e:
         logger.warning(f"Redis setup failed: {e}")
 
-
 @app.route('/health')
 @app.route('/')
 def health():
-    return jsonify({"status": "ok", "service": SERVICE_NAME, "platform": "ec2"})
-
+    return jsonify({"status": "ok", "service": SERVICE_NAME, "platform": "ecs"})
 
 @app.route('/inventory')
 def get_inventory():
@@ -86,8 +55,7 @@ def get_inventory():
         except Exception as e:
             steps.append(f"s3: {e}")
 
-    return jsonify({"productId": product_id, "platform": "ec2", "steps": steps})
-
+    return jsonify({"productId": product_id, "platform": "ecs", "steps": steps})
 
 if __name__ == '__main__':
     port = int(os.environ.get('SERVICE_PORT', '8080'))

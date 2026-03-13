@@ -1,16 +1,7 @@
-"""Order Processor - ECS Service with OTel SDK + collector sidecar."""
+"""Order Processor - ECS Service with vanilla OTel auto-instrumentation."""
 import json, os, uuid, time, logging, boto3, requests
 from flask import Flask, request, jsonify
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-from opentelemetry.instrumentation.kafka import KafkaInstrumentor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,23 +23,12 @@ PG_USER = os.environ.get('PG_USER', 'otelu')
 PG_PASSWORD = os.environ.get('PG_PASSWORD', 'otelpassword123')
 PG_DATABASE = os.environ.get('PG_DATABASE', 'otel')
 
-# MSK Serverless (Kafka with IAM auth)
+# MSK Serverless
 MSK_BOOTSTRAP = os.environ.get('MSK_BOOTSTRAP', '')
 
-resource = Resource.create({"service.name": SERVICE_NAME, "service.namespace": "otel-demo-multi"})
-provider = TracerProvider(resource=resource)
-exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
-provider.add_span_processor(BatchSpanProcessor(exporter))
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer(SERVICE_NAME)
-
-BotocoreInstrumentor().instrument()
-RequestsInstrumentor().instrument()
-Psycopg2Instrumentor().instrument()
-KafkaInstrumentor().instrument()
+tracer = trace.get_tracer(__name__)
 
 app = Flask(__name__)
-FlaskInstrumentor().instrument_app(app)
 
 dynamodb = boto3.resource('dynamodb', region_name=REGION)
 sns = boto3.client('sns', region_name=REGION)
@@ -159,7 +139,7 @@ def create_order():
         except Exception as e:
             steps.append(f"sns: {e}")
 
-    # SQS (direct, separate from SNS subscription)
+    # SQS
     if SQS_QUEUE_URL:
         try:
             sqs.send_message(QueueUrl=SQS_QUEUE_URL, MessageBody=json.dumps(order_data))

@@ -137,6 +137,8 @@ Resources:
               Value: '8080'
             - Name: OTEL_SERVICE_NAME
               Value: multi-order-processor
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: http://localhost:4318
             - Name: OTEL_PROPAGATORS
               Value: xray,tracecontext,baggage
             - Name: DYNAMODB_TABLE_NAME
@@ -260,6 +262,10 @@ Resources:
               Value: '8080'
             - Name: OTEL_SERVICE_NAME
               Value: multi-inventory-service
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: http://localhost:4318
+            - Name: OTEL_PROPAGATORS
+              Value: xray,tracecontext,baggage
             - Name: VALKEY_ADDR
               Value: !ImportValue OtelDemoValkeyEndpoint
             - Name: S3_BUCKET_NAME
