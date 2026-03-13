@@ -201,6 +201,11 @@ Resources:
                         endpoint: 0.0.0.0:4318
                       grpc:
                         endpoint: 0.0.0.0:4317
+                processors:
+                  resourcedetection:
+                    detectors: [env, ecs, ec2]
+                    timeout: 5s
+                    override: false
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -217,6 +222,7 @@ Resources:
                   pipelines:
                     traces:
                       receivers: [otlp]
+                      processors: [resourcedetection]
                       exporters: [otlphttp/xray, debug]
 
   OrderService:
@@ -308,6 +314,11 @@ Resources:
                         endpoint: 0.0.0.0:4318
                       grpc:
                         endpoint: 0.0.0.0:4317
+                processors:
+                  resourcedetection:
+                    detectors: [env, ecs, ec2]
+                    timeout: 5s
+                    override: false
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -324,6 +335,7 @@ Resources:
                   pipelines:
                     traces:
                       receivers: [otlp]
+                      processors: [resourcedetection]
                       exporters: [otlphttp/xray, debug]
 
   InventoryService:
@@ -467,6 +479,11 @@ Resources:
                         endpoint: 0.0.0.0:4318
                       grpc:
                         endpoint: 0.0.0.0:4317
+                processors:
+                  resourcedetection:
+                    detectors: [env, ecs, ec2]
+                    timeout: 5s
+                    override: false
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -483,6 +500,7 @@ Resources:
                   pipelines:
                     traces:
                       receivers: [otlp]
+                      processors: [resourcedetection]
                       exporters: [otlphttp/xray, debug]
                     metrics:
                       receivers: [otlp]
