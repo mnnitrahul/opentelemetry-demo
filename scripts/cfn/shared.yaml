@@ -364,6 +364,7 @@ Resources:
                   - ec2:DeleteNetworkInterface
                   - ec2:DescribeSubnets
                   - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
                 Resource: '*'
               - Sid: ECRPull
                 Effect: Allow
