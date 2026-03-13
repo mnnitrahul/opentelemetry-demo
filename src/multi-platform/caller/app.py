@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 SERVICE_NAME = os.environ.get('OTEL_SERVICE_NAME', 'multi-platform-caller')
 ECS_URL = os.environ.get('ECS_ORDER_URL', '')
+JAVA_URL = os.environ.get('ECS_ORDER_JAVA_URL', '')
 LAMBDA_URL = os.environ.get('LAMBDA_PAYMENT_URL', '')
 EC2_URL = os.environ.get('EC2_INVENTORY_URL', '')
 
@@ -25,6 +26,13 @@ def call_services():
                 logger.info(f"ECS: {resp.status_code}")
             except Exception as e:
                 logger.error(f"ECS: {e}")
+
+        if JAVA_URL:
+            try:
+                resp = requests.get(JAVA_URL, timeout=20)
+                logger.info(f"Java: {resp.status_code}")
+            except Exception as e:
+                logger.error(f"Java: {e}")
 
         if LAMBDA_URL:
             try:
@@ -44,7 +52,7 @@ def call_services():
 
 
 if __name__ == '__main__':
-    logger.info(f"Starting caller: ECS={ECS_URL} Lambda={LAMBDA_URL} EC2={EC2_URL}")
+    logger.info(f"Starting caller: ECS={ECS_URL} Java={JAVA_URL} Lambda={LAMBDA_URL} EC2={EC2_URL}")
     while True:
         try:
             call_services()
