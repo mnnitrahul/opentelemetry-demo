@@ -203,26 +203,161 @@ Each ECS task runs `otel/opentelemetry-collector-contrib` as a sidecar with:
 
 ## Prerequisites
 
-- AWS CLI v2, eksctl, kubectl, Helm v3, Docker, Python 3.12+
-- GitHub repo with `AWS_ROLE_ARN` secret
+Install these tools before starting:
 
-## Deployment
-
-### Step 1: GitHub Actions IAM (one-time)
 ```bash
-./scripts/setup-iam-oidc.sh <github-org/repo>
+# AWS CLI v2
+curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"  # macOS
+sudo installer -pkg AWSCLIV2.pkg -target /
+
+# eksctl
+brew install eksctl          # macOS
+# or: curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
+
+# kubectl
+brew install kubectl         # macOS
+
+# Helm v3
+brew install helm            # macOS
+
+# Docker Desktop (for building ECS/caller images)
+# https://www.docker.com/products/docker-desktop/
+
+# Python 3.12+ with pip (for Lambda packaging)
+brew install python@3.12     # macOS
 ```
-Add output role ARN as GitHub secret `AWS_ROLE_ARN`.
 
-### Step 2: Deploy (pick one)
-
-**GitHub Actions (recommended):** Push to `main` — auto-deploys both apps.
-
-**Manual:**
+Verify:
 ```bash
-./scripts/setup-eks.sh                                          # Original EKS
-./scripts/deploy-multi-platform.sh --region us-east-1           # Multi EKS + shared CFN
-./scripts/deploy-multi-services.sh --region us-east-1           # ECS + Lambda + caller
+aws --version        # >= 2.x
+eksctl version       # >= 0.170
+kubectl version --client
+helm version         # >= 3.x
+docker --version
+python3 --version    # >= 3.12
+```
+
+## Setup (one-time per AWS account)
+
+### Step 1: Configure AWS CLI
+
+```bash
+# Option A: SSO login (recommended)
+aws configure sso
+aws sso login --profile <your-profile>
+export AWS_PROFILE=<your-profile>
+
+# Option B: Access keys
+aws configure
+# Enter Access Key ID, Secret Access Key, region: us-east-1
+
+# Verify
+aws sts get-caller-identity
+```
+
+### Step 2: Create GitHub OIDC + IAM Role
+
+This creates an OIDC identity provider in your AWS account so GitHub Actions
+can assume an IAM role without storing AWS credentials as secrets.
+
+```bash
+# Replace with your GitHub org/repo
+./scripts/setup-iam-oidc.sh <github-org/repo>
+
+# Example:
+./scripts/setup-iam-oidc.sh mnnitrahul/opentelemetry-demo
+```
+
+The script:
+1. Creates OIDC provider `token.actions.githubusercontent.com` (idempotent)
+2. Creates IAM policy `github-actions-otel-demo-policy` with permissions for EKS, ECS, Lambda, CloudFormation, ECR, S3, SNS, SQS, Kinesis, DynamoDB, ElastiCache, RDS, MSK, IAM, EC2, API Gateway, X-Ray, CloudWatch
+3. Creates IAM role `github-actions-otel-demo` with OIDC trust for your repo
+4. Prints the role ARN
+
+### Step 3: Add GitHub Secret
+
+1. Go to your repo: `https://github.com/<org>/<repo>/settings/secrets/actions/new`
+2. Click "New repository secret"
+3. Name: `AWS_ROLE_ARN`
+4. Value: paste the role ARN from Step 2 output (e.g., `arn:aws:iam::123456789012:role/github-actions-otel-demo`)
+5. Click "Add secret"
+
+### Step 4: Enable GitHub Actions
+
+1. Go to `https://github.com/<org>/<repo>/settings/actions`
+2. Ensure "Allow all actions and reusable workflows" is selected
+3. Under "Workflow permissions", select "Read and write permissions"
+
+## Deploy
+
+### Option A: GitHub Actions (recommended)
+
+Push to `main` — auto-deploys everything:
+```bash
+git add -A
+git commit -m "deploy"
+git push origin main
+```
+
+Or trigger manually:
+1. Go to `https://github.com/<org>/<repo>/actions`
+2. Click "Multi-Platform Deploy" workflow
+3. Click "Run workflow"
+4. Select `deploy` action, confirm region `us-east-1`
+5. Click "Run workflow"
+
+The workflow deploys in order:
+1. Original EKS app on `otel-demo` cluster (~15 min first time)
+2. Multi-platform EKS app on `otel-demo-multi` cluster (~15 min first time)
+3. Shared CloudFormation stack (DynamoDB, S3, SNS, SQS, Kinesis, ElastiCache, Aurora, MSK)
+4. Builds Docker images, pushes to ECR
+5. Packages Lambda functions, uploads to S3
+6. Deploys ECS + Lambda CloudFormation stacks
+7. Deploys caller pod on EKS
+
+### Option B: Manual (from local machine)
+
+```bash
+# 1. Deploy original EKS app (creates otel-demo cluster)
+./scripts/setup-eks.sh
+
+# 2. Deploy multi-platform EKS cluster + shared infrastructure
+./scripts/deploy-multi-platform.sh --region us-east-1 --cluster otel-demo
+
+# 3. Build images, package Lambda, deploy ECS + Lambda stacks
+./scripts/deploy-multi-services.sh --region us-east-1
+```
+
+### Post-Deploy: Grant Local kubectl Access
+
+If the cluster was created by GitHub Actions, your local IAM identity
+needs an access entry to use kubectl:
+
+```bash
+# Get your IAM role ARN
+aws sts get-caller-identity --query Arn --output text
+# If it shows assumed-role, extract the role name and construct:
+# arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME>
+
+# Grant access to both clusters
+for CLUSTER in otel-demo otel-demo-multi; do
+  aws eks create-access-entry \
+    --cluster-name $CLUSTER --region us-east-1 \
+    --principal-arn arn:aws:iam::<ACCOUNT_ID>:role/<YOUR_ROLE>
+
+  aws eks associate-access-policy \
+    --cluster-name $CLUSTER --region us-east-1 \
+    --principal-arn arn:aws:iam::<ACCOUNT_ID>:role/<YOUR_ROLE> \
+    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --access-scope type=cluster
+done
+
+# Update kubeconfig
+aws eks update-kubeconfig --name otel-demo --region us-east-1
+aws eks update-kubeconfig --name otel-demo-multi --region us-east-1
+
+# Verify
+kubectl get nodes
 ```
 
 ## Accessing UIs
