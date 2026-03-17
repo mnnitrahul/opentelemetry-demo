@@ -74,7 +74,23 @@ docker push "${JAVA_IMAGE}" 2>&1
 echo "  Pushed: ${JAVA_IMAGE}"
 
 # ---------------------------------------------------------------------------
-# Step 2c: Build and push caller image
+# Step 2c: Build and push Vert.x order-processor image
+# ---------------------------------------------------------------------------
+echo ""
+echo "[2c/6] Building Vert.x order-processor..."
+VERTX_REPO="otel-demo-multi/order-processor-vertx"
+VERTX_IMAGE="${ECR_REGISTRY}/${VERTX_REPO}:latest"
+
+if ! aws ecr describe-repositories --repository-names "${VERTX_REPO}" --region "${REGION}" > /dev/null 2>&1; then
+  aws ecr create-repository --repository-name "${VERTX_REPO}" --region "${REGION}" --no-cli-pager > /dev/null
+fi
+
+docker build -t "${VERTX_IMAGE}" "${REPO_ROOT}/src/multi-platform/ecs-vertx/" 2>&1
+docker push "${VERTX_IMAGE}" 2>&1
+echo "  Pushed: ${VERTX_IMAGE}"
+
+# ---------------------------------------------------------------------------
+# Step 2d: Build and push caller image
 # ---------------------------------------------------------------------------
 echo ""
 echo "  Building caller service..."
@@ -178,6 +194,7 @@ aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ecs \
     "OrderProcessorImage=${ECS_IMAGE}" \
     "InventoryImage=${EC2_IMAGE}" \
     "OrderProcessorJavaImage=${JAVA_IMAGE}" \
+    "OrderProcessorVertxImage=${VERTX_IMAGE}" \
     "PaymentEndpoint=${PAYMENT_ENDPOINT}" \
     "MskBootstrap=${MSK_BOOTSTRAP}"
 
@@ -230,6 +247,8 @@ spec:
           value: http://${ECS_ALB}/order
         - name: ECS_ORDER_JAVA_URL
           value: http://${ECS_ALB}/order-java
+        - name: ECS_ORDER_VERTX_URL
+          value: http://${ECS_ALB}/order-vertx
         - name: LAMBDA_PAYMENT_URL
           value: ${PAYMENT_ENDPOINT}
         - name: EC2_INVENTORY_URL

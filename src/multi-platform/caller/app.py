@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = os.environ.get('OTEL_SERVICE_NAME', 'multi-platform-caller')
 ECS_URL = os.environ.get('ECS_ORDER_URL', '')
 JAVA_URL = os.environ.get('ECS_ORDER_JAVA_URL', '')
+VERTX_URL = os.environ.get('ECS_ORDER_VERTX_URL', '')
 LAMBDA_URL = os.environ.get('LAMBDA_PAYMENT_URL', '')
 EC2_URL = os.environ.get('EC2_INVENTORY_URL', '')
 
@@ -46,6 +47,23 @@ def call_services():
             except Exception as e:
                 logger.error(f"Java: {e}")
 
+        # ECS Vert.x order-processor
+        if VERTX_URL:
+            # Alternate between native-db and rx-db endpoints to test both
+            if iteration % 3 == 0:
+                vurl = VERTX_URL.replace("/order-vertx", "/order-vertx-rx-db")
+            elif iteration % 3 == 1:
+                vurl = VERTX_URL.replace("/order-vertx", "/order-vertx-native-db")
+            else:
+                vurl = VERTX_URL
+            if slow:
+                vurl = VERTX_URL.replace("/order-vertx", "/order-vertx-slow")
+            try:
+                resp = requests.get(vurl, timeout=30 if slow else 20)
+                logger.info(f"Vertx({vurl.split('/')[-1]}): {resp.status_code}")
+            except Exception as e:
+                logger.error(f"Vertx: {e}")
+
         # Lambda via API Gateway
         if LAMBDA_URL:
             try:
@@ -66,7 +84,7 @@ def call_services():
 
 
 if __name__ == '__main__':
-    logger.info(f"Starting caller: ECS={ECS_URL} Java={JAVA_URL} Lambda={LAMBDA_URL} EC2={EC2_URL}")
+    logger.info(f"Starting caller: ECS={ECS_URL} Java={JAVA_URL} Vertx={VERTX_URL} Lambda={LAMBDA_URL} EC2={EC2_URL}")
     while True:
         try:
             call_services()
