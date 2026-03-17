@@ -12,6 +12,7 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.pgclient.PgConnectOptions;
 import io.vertx.pgclient.PgPool;
+import io.vertx.pgclient.SslMode;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.Tuple;
@@ -74,7 +75,7 @@ public class MainVerticle extends AbstractVerticle {
                 .setDatabase(env("PG_DATABASE", "otel"))
                 .setUser(env("PG_USER", "otelu"))
                 .setPassword(env("PG_PASSWORD", "otelpassword123"))
-                .setSsl(true)
+                .setSslMode(SslMode.REQUIRE)
                 .setTrustAll(true);
             pgPool = PgPool.pool(vertx, connectOptions, new PoolOptions().setMaxSize(5));
 
