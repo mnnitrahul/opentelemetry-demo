@@ -121,6 +121,15 @@ public class OrderController {
 
     @RequestMapping(value = {"/order", "/order-java"}, method = {RequestMethod.GET, RequestMethod.POST})
     public ResponseEntity<Map<String, Object>> createOrder() {
+        return processOrder(false);
+    }
+
+    @RequestMapping(value = {"/order-slow", "/order-java-slow"}, method = {RequestMethod.GET, RequestMethod.POST})
+    public ResponseEntity<Map<String, Object>> createOrderSlow() {
+        return processOrder(true);
+    }
+
+    private ResponseEntity<Map<String, Object>> processOrder(boolean simulateSlow) {
         String orderId = UUID.randomUUID().toString();
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
         List<String> steps = new ArrayList<>();
@@ -216,6 +225,15 @@ public class OrderController {
 
         // Aurora PostgreSQL
         if (pgConn != null) {
+            // Simulate slow query on managed PostgreSQL (Aurora)
+            if (simulateSlow) {
+                try (Statement stmt = pgConn.createStatement()) {
+                    stmt.execute("SELECT pg_sleep(2)");
+                    steps.add("aurora: slow query (2s pg_sleep)");
+                } catch (Exception e) {
+                    steps.add("aurora-slow: " + e.getMessage());
+                }
+            }
             try (PreparedStatement ps = pgConn.prepareStatement(
                     "INSERT INTO orders_java (order_id, status, platform) VALUES (?, ?, ?) ON CONFLICT (order_id) DO NOTHING")) {
                 ps.setString(1, orderId);

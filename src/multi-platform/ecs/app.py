@@ -96,6 +96,13 @@ def health():
 
 @app.route('/order', methods=['GET', 'POST'])
 def create_order():
+    return process_order(simulate_slow=False)
+
+@app.route('/order-slow', methods=['GET', 'POST'])
+def create_order_slow():
+    return process_order(simulate_slow=True)
+
+def process_order(simulate_slow=False):
     order_id = str(uuid.uuid4())
     order_data = {"orderId": order_id, "status": "CREATED", "platform": "ecs", "timestamp": str(int(time.time()))}
     steps = []
@@ -157,6 +164,14 @@ def create_order():
 
     # Aurora PostgreSQL
     if pg_conn:
+        # Simulate slow query on managed PostgreSQL (Aurora)
+        if simulate_slow:
+            try:
+                with pg_conn.cursor() as cur:
+                    cur.execute("SELECT pg_sleep(2)")
+                steps.append("aurora: slow query (2s pg_sleep)")
+            except Exception as e:
+                steps.append(f"aurora-slow: {e}")
         try:
             with pg_conn.cursor() as cur:
                 cur.execute(
