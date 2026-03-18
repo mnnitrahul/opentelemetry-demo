@@ -24,13 +24,16 @@ extended to run across AWS EKS, ECS Fargate, and Lambda with unified X-Ray traci
 - `scripts/helm-values-multi.yaml` — Helm overrides for multi-platform app (all services with `multi-` prefixed names, `useDefault.env: false`)
 
 ### Application Code (new files)
-- `src/multi-platform/ecs/app.py` — Order processor (Flask + vanilla OTel SDK)
-- `src/multi-platform/ec2/app.py` — Inventory service (Flask + vanilla OTel SDK)
-- `src/multi-platform/caller/app.py` — Cross-platform caller (OTel SDK, calls ECS + Lambda)
+- `src/multi-platform/ecs/app.py` — Order processor (Flask + vanilla OTel auto-instrumentation)
+- `src/multi-platform/ecs-java/` — Order processor Java (Spring Boot + OTel Java agent)
+- `src/multi-platform/ecs-vertx/` — Order processor Vert.x (Vert.x 4.5 + OTel Java agent, tests reactive SQL client instrumentation)
+- `src/multi-platform/ec2/app.py` — Inventory service (Flask + vanilla OTel auto-instrumentation)
+- `src/multi-platform/caller/app.py` — Cross-platform caller (OTel auto-instrumentation, separate trace per call)
 - `src/multi-platform/lambda/payment_processor.py` — Payment handler (X-Ray SDK)
 - `src/multi-platform/lambda/sqs_consumer.py` — SQS consumer (X-Ray SDK)
 - `src/multi-platform/lambda/sns_consumer.py` — SNS consumer (X-Ray SDK)
 - `src/multi-platform/lambda/kinesis_consumer.py` — Kinesis consumer (X-Ray SDK)
+- `src/multi-platform/lambda/msk_consumer.py` — MSK consumer (X-Ray SDK)
 - `src/multi-platform/*/Dockerfile` — Container images for ECS and caller
 - `src/multi-platform/*/requirements.txt` — Python dependencies
 
@@ -102,13 +105,20 @@ Two EKS clusters run side by side:
 
 ### ECS Fargate Services
 
-| Service | OTEL_SERVICE_NAME | Image Source |
-|---------|-------------------|-------------|
-| Order Processor | multi-order-processor | `src/multi-platform/ecs/` |
-| Inventory Service | multi-inventory-service | `src/multi-platform/ec2/` |
+| Service | OTEL_SERVICE_NAME | Framework | Image Source | ALB Path |
+|---------|-------------------|-----------|-------------|----------|
+| Order Processor | multi-order-processor | Python/Flask | `src/multi-platform/ecs/` | `/order*`, `/order-slow` |
+| Order Processor Java | multi-order-processor-java | Java/Spring Boot | `src/multi-platform/ecs-java/` | `/order-java*`, `/order-java-slow` |
+| Order Processor Vert.x | multi-order-processor-vertx | Java/Vert.x | `src/multi-platform/ecs-vertx/` | `/order-vertx*`, `/order-vertx-slow` |
+| Inventory Service | multi-inventory-service | Python/Flask | `src/multi-platform/ec2/` | `/inventory*` |
 
-Both behind a single ALB: `/order*` -> order-processor, `/inventory*` -> inventory-service.
-Each task has an OTel Collector Contrib sidecar with sigv4auth -> X-Ray.
+All behind a single ALB with path-based routing. Each task has an OTel Collector Contrib sidecar with sigv4auth + ECS resource detection -> X-Ray.
+
+Auto-instrumentation:
+- Python services: `opentelemetry-instrument` CLI via Dockerfile
+- Java services: `-javaagent:opentelemetry-javaagent.jar` (vanilla OTel, not ADOT)
+
+Slow query endpoints (`/order-slow`, `/order-java-slow`, `/order-vertx-slow`) run `SELECT pg_sleep(2)` on Aurora to simulate slow DB queries. The caller triggers these every ~5 minutes.
 
 ### Lambda Functions
 
@@ -157,20 +167,21 @@ All use ADOT Python layer + X-Ray SDK for Application Signals.
 
 ## Trace Flow
 
+Each service call creates its own independent trace (not one giant trace).
+
 ```
-multi-platform-caller (EKS, every 30s)
-  |-> ECS ALB /order -> multi-order-processor
-  |     |-> DynamoDB (put order)
-  |     |-> S3 (read catalog)
-  |     |-> API Gateway /payment -> multi-payment-processor (Lambda) -> DynamoDB
-  |     |-> ECS ALB /inventory -> multi-inventory-service -> ElastiCache, S3
-  |     |-> SNS (publish) -> multi-sns-consumer (Lambda) -> DynamoDB
-  |     |-> SQS (send) -> multi-sqs-consumer (Lambda) -> DynamoDB
-  |     |-> Kinesis (put) -> multi-kinesis-consumer (Lambda) -> DynamoDB
-  |     |-> Aurora PostgreSQL (insert order)
-  |     |-> MSK Kafka (publish order event)
-  |-> API Gateway /payment -> multi-payment-processor (Lambda)
-  |-> ECS ALB /inventory -> multi-inventory-service
+multi-platform-caller (EKS, every 30s, separate trace per call)
+  |-> ECS ALB /order -> multi-order-processor (Python)
+  |     |-> DynamoDB, S3, API Gateway, inventory, SNS, SQS, Kinesis, Aurora, MSK
+  |-> ECS ALB /order-java -> multi-order-processor-java (Spring Boot)
+  |     |-> DynamoDB, S3, API Gateway, inventory, SNS, SQS, Kinesis, Aurora, MSK
+  |-> ECS ALB /order-vertx -> multi-order-processor-vertx (Vert.x)
+  |     |-> DynamoDB, S3, Aurora (native + RxJava2 wrapped PG client)
+  |-> API Gateway /payment -> multi-payment-processor (Lambda) -> DynamoDB
+  |-> ECS ALB /inventory -> multi-inventory-service -> ElastiCache, S3
+
+Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx-slow
+  -> SELECT pg_sleep(2) on Aurora (2-second DB span for slow query testing)
 ```
 
 ### Telemetry Paths
@@ -178,8 +189,21 @@ multi-platform-caller (EKS, every 30s)
 | Platform | SDK | Destination |
 |----------|-----|-------------|
 | EKS | Vanilla OTel SDK (per language) | In-cluster collector -> Jaeger + Prometheus + X-Ray |
-| ECS | Vanilla OTel Python SDK | Localhost sidecar collector -> X-Ray (sigv4auth) |
+| ECS Python | `opentelemetry-instrument` CLI | Localhost sidecar collector -> X-Ray (sigv4auth) |
+| ECS Java (Spring Boot) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray (sigv4auth) |
+| ECS Java (Vert.x) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray (sigv4auth) |
 | Lambda | ADOT Python layer + X-Ray SDK | X-Ray (native Lambda integration) |
+
+### Known Instrumentation Gaps
+
+| Gap | Language | Detail |
+|-----|----------|--------|
+| S3 bucket name missing | Python | botocore instrumentor doesn't capture `aws.s3.bucket`. Java does. |
+| SQS queue URL missing | Python | botocore instrumentor doesn't capture `aws.sqs.queue.url`. Java does. |
+| SNS topic ARN missing | Python | botocore instrumentor doesn't capture `sns.topic.arn`. Java does. |
+| Kinesis stream name missing | Python | botocore instrumentor doesn't capture `kinesis.stream_name`. Java does. |
+| Vert.x PG shows as UnknownRemoteService | Java/Vert.x | Vert.x SQL client instrumentation doesn't set `db.system`, `server.address`, `db.name`. JDBC does. |
+| Flask high-cardinality operations | Python | Unmatched routes use raw path as span name (100+ bot operations). Spring Boot normalizes to `/**`. |
 
 ## OTel Collector Configuration
 
@@ -197,9 +221,11 @@ Pipeline: `App -> OTLP -> Collector -> [otlp/jaeger, spanmetrics, otlphttp/xray,
 ### ECS Collector Sidecar (inline config in ecs.yaml)
 
 Each ECS task runs `otel/opentelemetry-collector-contrib` as a sidecar with:
+- `resourcedetection` processor with `ecs` and `ec2` detectors (adds `cloud.platform: aws_ecs`, cluster ARN, task ARN, launch type)
 - `sigv4auth` extension (uses ECS task role, not IRSA)
 - `otlphttp/xray` exporter to X-Ray
 - App sends OTLP HTTP to `localhost:4318`
+- Java sidecars also accept metrics and logs pipelines (Java agent exports all 3 signals)
 
 ## Prerequisites
 
