@@ -24,6 +24,12 @@ opentelemetry-collector:
         compression: gzip
         auth:
           authenticator: sigv4auth/metrics
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+        sending_queue:
+          enabled: true
     processors:
       resourcedetection:
         detectors: [env, system, eks, ec2]
