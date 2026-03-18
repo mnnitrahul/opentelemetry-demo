@@ -160,10 +160,10 @@ All use ADOT Python layer + X-Ray SDK for Application Signals.
 | Role | Used By | Permissions |
 |------|---------|-------------|
 | github-actions-otel-demo | GitHub Actions OIDC | Full deployment (EKS, ECS, Lambda, CFN, ECR, S3, SNS, SQS, etc.) |
-| otel-demo-ecs-task-role | ECS containers | DynamoDB, S3, X-Ray, SNS, SQS, Kinesis, MSK, Aurora (password auth) |
+| otel-demo-ecs-task-role | ECS containers | DynamoDB, S3, X-Ray, CloudWatch, SNS, SQS, Kinesis, MSK, Aurora (password auth) |
 | otel-demo-ecs-execution-role | ECS Fargate agent | ECR pull, CloudWatch Logs |
-| otel-demo-lambda-role | All Lambda functions | DynamoDB, SQS, Kinesis, X-Ray, CloudWatch Logs |
-| otel-collector-xray-policy | EKS collector (IRSA) | X-Ray PutTraceSegments, GetSamplingRules |
+| otel-demo-lambda-role | All Lambda functions | DynamoDB, SQS, Kinesis, X-Ray, CloudWatch, CloudWatch Logs |
+| otel-collector-xray-policy | EKS collector (IRSA) | X-Ray PutTraceSegments, GetSamplingRules, CloudWatch * |
 
 ## Trace Flow
 
@@ -188,10 +188,10 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 
 | Platform | SDK | Destination |
 |----------|-----|-------------|
-| EKS | Vanilla OTel SDK (per language) | In-cluster collector -> Jaeger + Prometheus + X-Ray |
-| ECS Python | `opentelemetry-instrument` CLI | Localhost sidecar collector -> X-Ray (sigv4auth) |
-| ECS Java (Spring Boot) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray (sigv4auth) |
-| ECS Java (Vert.x) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray (sigv4auth) |
+| EKS | Vanilla OTel SDK (per language) | In-cluster collector -> Jaeger + Prometheus + X-Ray + CloudWatch Metrics (granite) |
+| ECS Python | `opentelemetry-instrument` CLI | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
+| ECS Java (Spring Boot) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
+| ECS Java (Vert.x) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
 | Lambda | ADOT Python layer + X-Ray SDK | X-Ray (native Lambda integration) |
 
 ### Known Instrumentation Gaps
@@ -212,20 +212,46 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 The in-cluster OTel Collector is configured with these additions over vanilla:
 
 1. **sigv4auth extension** — Signs OTLP HTTP requests with AWS SigV4 using IRSA credentials
-2. **otlphttp/xray exporter** — Standard `otlphttp` exporter pointed at `https://xray.<region>.amazonaws.com` (NOT the `awsxray` plugin)
-3. **Resource detection** — `eks` and `ec2` detectors auto-tag telemetry with `cloud.provider`, `cloud.region`, `k8s.cluster.name`, etc.
-4. **Span metrics dimensions** — 12 attributes added for dependency graphs: `peer.service`, `db.system`, `messaging.system`, `rpc.service`, `rpc.method`, `http.route`, etc.
+2. **sigv4auth/metrics extension** — Separate SigV4 signer for CloudWatch metrics endpoint (service: `monitoring`)
+3. **otlphttp/xray exporter** — Standard `otlphttp` exporter pointed at `https://xray.<region>.amazonaws.com` (NOT the `awsxray` plugin)
+4. **otlphttp/cloudwatch-metrics exporter** — Standard `otlphttp` exporter pointed at `https://granite.amazonaws.com` (pre-prod CloudWatch Metrics OTLP endpoint)
+5. **Resource detection** — `eks` and `ec2` detectors auto-tag telemetry with `cloud.provider`, `cloud.region`, etc. **Note:** The OTel `eks` detector cannot auto-detect the EKS cluster name. If you need `k8s.cluster.name` as a resource attribute, you must set it manually via `OTEL_RESOURCE_ATTRIBUTES=k8s.cluster.name=<your-cluster>` on the collector or application pods.
+6. **Span metrics dimensions** — 12 attributes added for dependency graphs: `peer.service`, `db.system`, `messaging.system`, `rpc.service`, `rpc.method`, `http.route`, etc.
 
-Pipeline: `App -> OTLP -> Collector -> [otlp/jaeger, spanmetrics, otlphttp/xray, debug]`
+Pipeline:
+- Traces: `App -> OTLP -> Collector -> [otlp/jaeger, spanmetrics, otlphttp/xray, debug]`
+- Metrics: `App -> OTLP -> Collector -> [otlphttp/prometheus, otlphttp/cloudwatch-metrics, debug]`
 
 ### ECS Collector Sidecar (inline config in ecs.yaml)
 
 Each ECS task runs `otel/opentelemetry-collector-contrib` as a sidecar with:
-- `resourcedetection` processor with `ecs` and `ec2` detectors (adds `cloud.platform: aws_ecs`, cluster ARN, task ARN, launch type)
-- `sigv4auth` extension (uses ECS task role, not IRSA)
+- `resourcedetection` processor with `ecs` and `ec2` detectors (adds `cloud.platform: aws_ecs`, cluster ARN, task ARN, launch type). **Note:** For ECS, the cluster name is derived automatically from the ECS task metadata (cluster ARN).
+- `sigv4auth` extension (uses ECS task role, not IRSA) for X-Ray traces
+- `sigv4auth/metrics` extension (service: `monitoring`) for CloudWatch metrics
 - `otlphttp/xray` exporter to X-Ray
+- `otlphttp/cloudwatch-metrics` exporter to `https://granite.amazonaws.com` (pre-prod CloudWatch Metrics OTLP endpoint)
 - App sends OTLP HTTP to `localhost:4318`
 - Java sidecars also accept metrics and logs pipelines (Java agent exports all 3 signals)
+
+### CloudWatch Metrics OTLP Endpoint
+
+The demo sends metrics to the CloudWatch Metrics OTLP endpoint (currently using the pre-prod granite endpoint).
+
+**Configuration:**
+- Endpoint: `https://granite.amazonaws.com` (pre-prod). Production will be `https://monitoring.<region>.amazonaws.com`
+- Auth: SigV4 with `service: monitoring` (separate from X-Ray which uses `service: xray`)
+- Protocol: HTTP only (no gRPC), same as X-Ray/Logs OTLP endpoints
+- Compression: gzip
+
+**IAM permissions required:** `cloudwatch:*` (currently broad for testing; production should use `cloudwatch:PutMetricData`)
+
+**Resource attribute notes:**
+- EKS: The OTel `eks` resource detector does NOT auto-detect the cluster name. To have `k8s.cluster.name` appear as a dimension in CloudWatch, set it explicitly: `OTEL_RESOURCE_ATTRIBUTES=k8s.cluster.name=otel-demo`
+- ECS: The `ecs` resource detector derives the cluster name from the ECS task metadata endpoint (cluster ARN). No manual configuration needed.
+
+**Known data quality issues with the demo:**
+- Some spanmetrics dimensions (`peer.service`, `http.route`, `db.system`, etc.) emit empty string values when the source span lacks those attributes. The granite endpoint rejects datapoints with blank attribute values (partial success — other datapoints in the same metric are accepted).
+- Some host/infrastructure metrics have non-string attribute types that the endpoint rejects (HTTP 400 — entire ResourceMetrics batch dropped).
 
 ## Prerequisites
 
