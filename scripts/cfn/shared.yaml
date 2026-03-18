@@ -233,6 +233,11 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+              - Sid: CloudWatchMetrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:*
+                Resource: "*"
               - Sid: S3Read
                 Effect: Allow
                 Action:
@@ -349,6 +354,11 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+              - Sid: CloudWatchFull
+                Effect: Allow
+                Action:
+                  - cloudwatch:*
+                Resource: "*"
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
@@ -401,6 +411,11 @@ Resources:
                   - xray:PutTelemetryRecords
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
+                Resource: "*"
+              - Sid: CloudWatchFull
+                Effect: Allow
+                Action:
+                  - cloudwatch:*
                 Resource: "*"
               - Sid: CloudWatchLogs
                 Effect: Allow

@@ -46,13 +46,21 @@ opentelemetry-collector:
       sigv4auth:
         region: us-east-1
         service: xray
+      sigv4auth/metrics:
+        region: us-east-1
+        service: monitoring
 
-    # [3] X-Ray: Standard OTLP exporter pointed at AWS endpoint
+    # [3] X-Ray + CloudWatch Metrics: Standard OTLP exporters pointed at AWS endpoints
     exporters:
       otlphttp/xray:
         endpoint: https://xray.us-east-1.amazonaws.com
         auth:
           authenticator: sigv4auth
+      otlphttp/cloudwatch-metrics:
+        endpoint: https://granite.amazonaws.com
+        compression: gzip
+        auth:
+          authenticator: sigv4auth/metrics
 
     # [4] Resource Detection: Auto-discover AWS/EKS metadata
     processors:
@@ -86,6 +94,7 @@ opentelemetry-collector:
       extensions:
         - health_check
         - sigv4auth
+        - sigv4auth/metrics
         - k8s_observer
         - k8s_leader_elector/k8s_cluster
       pipelines:
@@ -95,3 +104,8 @@ opentelemetry-collector:
             - debug
             - spanmetrics
             - otlphttp/xray
+        metrics:
+          exporters:
+            - otlphttp/prometheus
+            - debug
+            - otlphttp/cloudwatch-metrics

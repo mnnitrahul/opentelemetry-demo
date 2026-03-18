@@ -344,11 +344,17 @@ echo "[6/8] Setting up IRSA for ${NAMESPACE} on ${MULTI_CLUSTER}..."
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 XRAY_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/otel-collector-xray-policy"
 
-# Create X-Ray IAM policy if not exists
+# Create or update X-Ray + CloudWatch IAM policy
+XRAY_POLICY_DOC='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets","cloudwatch:*"],"Resource":"*"}]}'
 if ! aws iam get-policy --policy-arn "${XRAY_POLICY_ARN}" &>/dev/null; then
   XRAY_POLICY_ARN=$(aws iam create-policy --policy-name otel-collector-xray-policy \
-    --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets"],"Resource":"*"}]}' \
+    --policy-document "${XRAY_POLICY_DOC}" \
     --query 'Policy.Arn' --output text)
+else
+  # Update existing policy with new version (add cloudwatch:*)
+  aws iam create-policy-version --policy-arn "${XRAY_POLICY_ARN}" \
+    --policy-document "${XRAY_POLICY_DOC}" \
+    --set-as-default 2>/dev/null || true
 fi
 
 # Create IRSA — uses a different role name to avoid conflict with original cluster

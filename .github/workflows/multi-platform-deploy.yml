@@ -62,10 +62,15 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/otel-collector-xray-policy"
 
+          XRAY_POLICY_DOC='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets","cloudwatch:*"],"Resource":"*"}]}'
           if ! aws iam get-policy --policy-arn "${POLICY_ARN}" &>/dev/null; then
             POLICY_ARN=$(aws iam create-policy --policy-name otel-collector-xray-policy \
-              --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets"],"Resource":"*"}]}' \
+              --policy-document "${XRAY_POLICY_DOC}" \
               --query 'Policy.Arn' --output text)
+          else
+            aws iam create-policy-version --policy-arn "${POLICY_ARN}" \
+              --policy-document "${XRAY_POLICY_DOC}" \
+              --set-as-default 2>/dev/null || true
           fi
 
           aws eks update-kubeconfig --name "${CLUSTER}" --region "${REGION}"

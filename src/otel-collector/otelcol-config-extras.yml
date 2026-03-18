@@ -3,20 +3,31 @@
 
 # Extra settings merged into OpenTelemetry Collector configuration
 # Adds X-Ray OTLP endpoint for traces alongside existing Jaeger exporter
+# Adds CloudWatch OTLP endpoint for metrics (granite pre-prod)
 
 extensions:
   sigv4auth:
     region: us-east-1
     service: xray
+  sigv4auth/metrics:
+    region: us-east-1
+    service: monitoring
 
 exporters:
   otlphttp/xray:
     endpoint: https://xray.us-east-1.amazonaws.com
     auth:
       authenticator: sigv4auth
+  otlphttp/cloudwatch-metrics:
+    endpoint: https://granite.amazonaws.com
+    compression: gzip
+    auth:
+      authenticator: sigv4auth/metrics
 
 service:
-  extensions: [sigv4auth]
+  extensions: [sigv4auth, sigv4auth/metrics]
   pipelines:
     traces:
       exporters: [otlp_grpc/jaeger, spanmetrics, otlphttp/xray, debug]
+    metrics:
+      exporters: [otlp_http/prometheus, debug, otlphttp/cloudwatch-metrics]
