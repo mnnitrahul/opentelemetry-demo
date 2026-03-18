@@ -106,6 +106,17 @@ jobs:
             --namespace "${NAMESPACE}" --create-namespace \
             -f /tmp/helm-values-xray.yaml --wait --timeout 15m
 
+          # Clean up any stale otel-demo-multi namespace on the original cluster
+          # This can happen if a previous deploy-multi-platform.sh run failed and
+          # left resources behind. The multi-platform app belongs on otel-demo-multi
+          # cluster, not here. Stale collector DaemonSets hold hostPorts and block
+          # the otel-demo collectors from scheduling.
+          if kubectl get namespace otel-demo-multi &>/dev/null; then
+            echo "WARNING: Found stale otel-demo-multi namespace on ${CLUSTER} cluster. Cleaning up..."
+            helm uninstall otel-demo-multi --namespace otel-demo-multi 2>/dev/null || true
+            kubectl delete namespace otel-demo-multi --timeout=120s 2>/dev/null || true
+          fi
+
       - name: Deploy multi-platform app (separate cluster + CFN stacks)
         run: |
           chmod +x ./scripts/deploy-multi-platform.sh

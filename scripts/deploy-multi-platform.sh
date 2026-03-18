@@ -388,6 +388,15 @@ echo "  IRSA configured for otel-collector in ${NAMESPACE}"
 echo ""
 echo "[7/8] Installing Helm release ${HELM_RELEASE} in ${NAMESPACE}..."
 
+# Safety check: verify we're on the multi cluster, not the original
+CURRENT_CLUSTER=$(kubectl config current-context 2>/dev/null || echo "unknown")
+if [[ "${CURRENT_CLUSTER}" != *"${MULTI_CLUSTER}"* ]]; then
+  echo "ERROR: kubectl context '${CURRENT_CLUSTER}' does not match expected cluster '${MULTI_CLUSTER}'."
+  echo "       Refusing to deploy to avoid hostPort conflicts on the wrong cluster."
+  echo "       Switching to the correct cluster..."
+  aws eks update-kubeconfig --name "${MULTI_CLUSTER}" --region "${REGION}"
+fi
+
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
 helm repo update
 
