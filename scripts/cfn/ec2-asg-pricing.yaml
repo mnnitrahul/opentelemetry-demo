@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Multi-Platform Demo - EC2 ASG pricing service behind ALB
+
+Parameters:
+  PricingImage:
+    Type: String
+    Description: ECR image URI for pricing-service
+  OtelCollectorEndpoint:
+    Type: String
+    Default: ''
+    Description: OTel Collector OTLP HTTP endpoint
+  S3BucketName:
+    Type: String
+    Default: ''
+    Description: S3 bucket name
+  Ec2Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  PricingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: otel-demo-pricing
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
+  AlbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB SG for pricing-service
+      VpcId: !ImportValue OtelDemoVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  InstanceIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !ImportValue OtelDemoEc2InstanceSG
+      IpProtocol: tcp
+      FromPort: 8081
+      ToPort: 8081
+      SourceSecurityGroupId: !Ref AlbSG
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: otel-demo-pricing-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !ImportValue OtelDemoPublicSubnet1
+        - !ImportValue OtelDemoPublicSubnet2
+      SecurityGroups:
+        - !Ref AlbSG
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: otel-demo-pricing-tg
+      Port: 8081
+      Protocol: HTTP
+      VpcId: !ImportValue OtelDemoVpcId
+      TargetType: instance
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      Matcher:
+        HttpCode: '200'
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: otel-demo-pricing-lt
+      LaunchTemplateData:
+        ImageId: !Ref Ec2Ami
+        InstanceType: t3.small
+        IamInstanceProfile:
+          Arn: !ImportValue OtelDemoEc2InstanceProfileArn
+        SecurityGroupIds:
+          - !ImportValue OtelDemoEc2InstanceSG
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            dnf install -y docker
+            systemctl enable docker && systemctl start docker
+            ECR_REGISTRY=$(echo "${PricingImage}" | cut -d/ -f1)
+            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${!ECR_REGISTRY}
+            docker pull ${PricingImage}
+            docker run -d --restart always --name pricing -p 8081:8080 \
+              -e SERVICE_PORT=8080 \
+              -e OTEL_SERVICE_NAME=multi-pricing-service \
+              -e OTEL_EXPORTER_OTLP_ENDPOINT=${OtelCollectorEndpoint} \
+              -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+              -e DYNAMODB_TABLE_NAME=otel-demo-pricing \
+              -e S3_BUCKET_NAME=${S3BucketName} \
+              -e AWS_REGION=${AWS::Region} \
+              ${PricingImage}
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: otel-demo-pricing-ec2
+              - Key: Project
+                Value: otel-demo
+
+  ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !ImportValue OtelDemoPublicSubnet1
+        - !ImportValue OtelDemoPublicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref ASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub
+            - "${AlbFullName}/${TgFullName}"
+            - AlbFullName: !GetAtt Alb.LoadBalancerFullName
+              TgFullName: !GetAtt TargetGroup.TargetGroupFullName
+        TargetValue: 100
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ec2/otel-demo-multi/pricing
+      RetentionInDays: 7
+
+Outputs:
+  AlbDnsName:
+    Description: Pricing ALB DNS
+    Value: !GetAtt Alb.DNSName
+    Export:
+      Name: OtelDemoPricingAlbDns
+  PricingEndpoint:
+    Description: Pricing service URL
+    Value: !Sub http://${Alb.DNSName}
+    Export:
+      Name: OtelDemoPricingEndpoint

@@ -23,7 +23,8 @@ SHARED_STACK="otel-demo-shared"
 ECS_STACK="otel-demo-ecs"
 LAMBDA_STACK="otel-demo-lambda"
 EC2_STACK="otel-demo-ec2"
-CLEANUP_ORDER=("${EC2_STACK}" "${LAMBDA_STACK}" "${ECS_STACK}" "${SHARED_STACK}")
+EC2_PRICING_STACK="otel-demo-ec2-pricing"
+CLEANUP_ORDER=("${EC2_PRICING_STACK}" "${EC2_STACK}" "${LAMBDA_STACK}" "${ECS_STACK}" "${SHARED_STACK}")
 
 # ---------------------------------------------------------------------------
 # Parse arguments

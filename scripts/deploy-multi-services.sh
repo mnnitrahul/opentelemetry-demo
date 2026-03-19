@@ -203,6 +203,34 @@ ECS_ALB=$(aws cloudformation describe-stacks --stack-name otel-demo-ecs --region
 echo "  Order processor: http://${ECS_ALB}/order"
 echo "  Inventory: http://${ECS_ALB}/inventory"
 
+# Deploy EC2 ASG pricing service stack
+echo "  Building EC2 ASG pricing-service..."
+PRICING_REPO="otel-demo-multi/pricing-service"
+PRICING_IMAGE="${ECR_REGISTRY}/${PRICING_REPO}:latest"
+
+if ! aws ecr describe-repositories --repository-names "${PRICING_REPO}" --region "${REGION}" > /dev/null 2>&1; then
+  aws ecr create-repository --repository-name "${PRICING_REPO}" --region "${REGION}" --no-cli-pager > /dev/null
+fi
+
+docker build -t "${PRICING_IMAGE}" "${REPO_ROOT}/src/multi-platform/ec2-asg/" 2>&1
+docker push "${PRICING_IMAGE}" 2>&1
+echo "  Pushed: ${PRICING_IMAGE}"
+
+echo "  Deploying EC2 ASG pricing stack..."
+wait_for_stack_delete "otel-demo-ec2-pricing"
+aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ec2-pricing \
+  --template-file "${CFN_DIR}/ec2-asg-pricing.yaml" \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --no-fail-on-empty-changeset \
+  --parameter-overrides \
+    "PricingImage=${PRICING_IMAGE}" \
+    "OtelCollectorEndpoint=" \
+    "S3BucketName=${S3_BUCKET}"
+
+PRICING_ALB=$(aws cloudformation describe-stacks --stack-name otel-demo-ec2-pricing --region "${REGION}" \
+  --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
+echo "  Pricing service: http://${PRICING_ALB}/price"
+
 # ---------------------------------------------------------------------------
 # Step 5: Upload sample catalog to S3
 # ---------------------------------------------------------------------------
@@ -253,6 +281,8 @@ spec:
           value: ${PAYMENT_ENDPOINT}
         - name: EC2_INVENTORY_URL
           value: http://${ECS_ALB}/inventory
+        - name: EC2_PRICING_URL
+          value: http://${PRICING_ALB}/price
 CALLEREOF
 
 kubectl apply -f /tmp/caller.yaml 2>/dev/null || echo "  Warning: could not deploy caller pod"
@@ -264,6 +294,7 @@ echo "============================================"
 echo ""
 echo "  ECS Order Processor: http://${ECS_ALB}/order"
 echo "  ECS Inventory:       http://${ECS_ALB}/inventory"
+echo "  EC2 ASG Pricing:     http://${PRICING_ALB}/price"
 echo "  Lambda Payment:      ${PAYMENT_ENDPOINT}"
 echo ""
 echo "  Test: curl http://${ECS_ALB}/order"

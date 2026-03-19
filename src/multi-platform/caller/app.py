@@ -12,6 +12,7 @@ JAVA_URL = os.environ.get('ECS_ORDER_JAVA_URL', '')
 VERTX_URL = os.environ.get('ECS_ORDER_VERTX_URL', '')
 LAMBDA_URL = os.environ.get('LAMBDA_PAYMENT_URL', '')
 EC2_URL = os.environ.get('EC2_INVENTORY_URL', '')
+EC2_PRICING_URL = os.environ.get('EC2_PRICING_URL', '')
 
 tracer = trace.get_tracer(__name__)
 iteration = 0
@@ -72,9 +73,13 @@ def run_cycle():
     if EC2_URL:
         call("ecs-inventory", "GET", EC2_URL, timeout=15)
 
+    # Pricing via EC2 ASG ALB
+    if EC2_PRICING_URL:
+        call("ec2-asg-pricing", "GET", EC2_PRICING_URL, timeout=15)
+
 
 if __name__ == '__main__':
-    logger.info(f"Starting caller: ECS={ECS_URL} Java={JAVA_URL} Vertx={VERTX_URL} Lambda={LAMBDA_URL} EC2={EC2_URL}")
+    logger.info(f"Starting caller: ECS={ECS_URL} Java={JAVA_URL} Vertx={VERTX_URL} Lambda={LAMBDA_URL} EC2={EC2_URL} Pricing={EC2_PRICING_URL}")
     while True:
         try:
             run_cycle()
