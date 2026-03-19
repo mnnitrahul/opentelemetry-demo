@@ -12,6 +12,7 @@ distributed architecture.
 | ECS + ALB (ASG capacity) | checkout, cart, product-catalog, product-reviews | Long-running gRPC services |
 | Lambda + API Gateway | ad, recommendation, currency, quote, email | Stateless request-response (HTTP) |
 | EC2 ASG + ALB | payment, shipping | Simulates legacy on-instance services |
+| EC2 ASG + ALB | pricing | Product pricing lookups (DynamoDB + S3) |
 
 ## AWS-Managed Dependencies (New)
 

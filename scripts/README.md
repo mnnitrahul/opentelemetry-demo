@@ -16,6 +16,7 @@ extended to run across AWS EKS, ECS Fargate, and Lambda with unified X-Ray traci
 - `scripts/cfn/ecs.yaml` — ECS Fargate cluster, ALB, task definitions with OTel Collector sidecars
 - `scripts/cfn/lambda.yaml` — 4 Lambda functions, REST API Gateway, event source mappings
 - `scripts/cfn/ec2-asg.yaml` — (unused, kept for reference)
+- `scripts/cfn/ec2-asg-pricing.yaml` — EC2 ASG pricing service: DynamoDB table, ALB, launch template, ASG with target-tracking scaling
 - `.github/workflows/eks-deploy.yml` — GitHub Actions: deploy/destroy original EKS app
 - `.github/workflows/multi-platform-deploy.yml` — GitHub Actions: deploy/destroy both apps
 
@@ -28,6 +29,7 @@ extended to run across AWS EKS, ECS Fargate, and Lambda with unified X-Ray traci
 - `src/multi-platform/ecs-java/` — Order processor Java (Spring Boot + OTel Java agent)
 - `src/multi-platform/ecs-vertx/` — Order processor Vert.x (Vert.x 4.5 + OTel Java agent, tests reactive SQL client instrumentation)
 - `src/multi-platform/ec2/app.py` — Inventory service (Flask + vanilla OTel auto-instrumentation)
+- `src/multi-platform/ec2-asg/app.py` — Pricing service (Flask + vanilla OTel auto-instrumentation, DynamoDB + S3)
 - `src/multi-platform/caller/app.py` — Cross-platform caller (OTel auto-instrumentation, separate trace per call)
 - `src/multi-platform/lambda/payment_processor.py` — Payment handler (X-Ray SDK)
 - `src/multi-platform/lambda/sqs_consumer.py` — SQS consumer (X-Ray SDK)
@@ -61,6 +63,9 @@ EKS Cluster: otel-demo-multi
 ECS Fargate (behind ALB, path-based routing)
   multi-order-processor  + OTel Collector Contrib sidecar -> X-Ray
   multi-inventory-service + OTel Collector Contrib sidecar -> X-Ray
+
+EC2 ASG (behind ALB)
+  multi-pricing-service  (DynamoDB + S3, OTel auto-instrumentation)
 
 Lambda (behind REST API Gateway with X-Ray tracing)
   multi-payment-processor  (API GW POST /payment)
@@ -141,12 +146,14 @@ All use ADOT Python layer + X-Ray SDK for Application Signals.
 | otel-demo-shared | `cfn/shared.yaml` | Security groups, IAM roles, DynamoDB, S3, SQS, SNS, Kinesis, ElastiCache, Aurora, MSK |
 | otel-demo-ecs | `cfn/ecs.yaml` | ECS Fargate cluster, ALB, 2 task definitions with collector sidecars |
 | otel-demo-lambda | `cfn/lambda.yaml` | 4 Lambda functions, REST API Gateway, event source mappings |
+| otel-demo-ec2-pricing | `cfn/ec2-asg-pricing.yaml` | EC2 ASG, ALB, DynamoDB pricing table, target-tracking scaling |
 
 ### Managed Services
 
 | Service | Resource Name | Used By | Purpose |
 |---------|--------------|---------|---------|
 | DynamoDB | otel-demo-orders | ECS order-processor, all Lambdas | Order/payment records |
+| DynamoDB | otel-demo-pricing | EC2 ASG pricing-service | Product pricing data |
 | S3 | otel-demo-assets-{account} | ECS order-processor, inventory-service | Product catalog |
 | SNS | otel-demo-order-topic | ECS -> Lambda sns-consumer | Order fan-out |
 | SQS | otel-demo-order-queue | ECS -> Lambda sqs-consumer | Order queue |
@@ -163,6 +170,7 @@ All use ADOT Python layer + X-Ray SDK for Application Signals.
 | otel-demo-ecs-task-role | ECS containers | DynamoDB, S3, X-Ray, CloudWatch, SNS, SQS, Kinesis, MSK, Aurora (password auth) |
 | otel-demo-ecs-execution-role | ECS Fargate agent | ECR pull, CloudWatch Logs |
 | otel-demo-lambda-role | All Lambda functions | DynamoDB, SQS, Kinesis, X-Ray, CloudWatch, CloudWatch Logs |
+| otel-demo-ec2-instance-role | EC2 ASG instances | S3, X-Ray, CloudWatch, DynamoDB read/write |
 | otel-collector-xray-policy | EKS collector (IRSA) | X-Ray PutTraceSegments, GetSamplingRules, CloudWatch * |
 
 ## Trace Flow
@@ -179,6 +187,7 @@ multi-platform-caller (EKS, every 30s, separate trace per call)
   |     |-> DynamoDB, S3, Aurora (native + RxJava2 wrapped PG client)
   |-> API Gateway /payment -> multi-payment-processor (Lambda) -> DynamoDB
   |-> ECS ALB /inventory -> multi-inventory-service -> ElastiCache, S3
+  |-> EC2 ASG ALB /price -> multi-pricing-service -> DynamoDB, S3
 
 Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx-slow
   -> SELECT pg_sleep(2) on Aurora (2-second DB span for slow query testing)
@@ -192,6 +201,7 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 | ECS Python | `opentelemetry-instrument` CLI | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
 | ECS Java (Spring Boot) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
 | ECS Java (Vert.x) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
+| EC2 ASG Python | `opentelemetry-instrument` CLI | OTLP to configured collector endpoint -> X-Ray |
 | Lambda | ADOT Python layer + X-Ray SDK | X-Ray (native Lambda integration) |
 
 ### Known Instrumentation Gaps
