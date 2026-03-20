@@ -141,7 +141,7 @@ Resources:
                 auth:
                   authenticator: sigv4auth/metrics
               debug:
-                verbosity: basic
+                verbosity: detailed
             service:
               extensions: [sigv4auth, sigv4auth/metrics]
               pipelines:

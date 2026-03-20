@@ -201,7 +201,7 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 | ECS Python | `opentelemetry-instrument` CLI | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
 | ECS Java (Spring Boot) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
 | ECS Java (Vert.x) | OTel Java agent (`-javaagent`) | Localhost sidecar collector -> X-Ray + CloudWatch Metrics (granite) |
-| EC2 ASG Python | `opentelemetry-instrument` CLI | OTLP to configured collector endpoint -> X-Ray |
+| EC2 ASG Python | `opentelemetry-instrument` CLI | Localhost sidecar collector (otel-collector-contrib on same EC2 instance) -> X-Ray + CloudWatch Metrics (granite) |
 | Lambda | ADOT Python layer + X-Ray SDK | X-Ray (native Lambda integration) |
 
 ### Known Instrumentation Gaps
@@ -214,6 +214,41 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 | Kinesis stream name missing | Python | botocore instrumentor doesn't capture `kinesis.stream_name`. Java does. |
 | Vert.x PG shows as UnknownRemoteService | Java/Vert.x | Vert.x SQL client instrumentation doesn't set `db.system`, `server.address`, `db.name`. JDBC does. |
 | Flask high-cardinality operations | Python | Unmatched routes use raw path as span name (100+ bot operations). Spring Boot normalizes to `/**`. |
+| EC2 ASG name not auto-detected | Python/All | The OTel `ec2` resource detector does not discover the Auto Scaling Group name. Only `host.id`, `host.type`, `cloud.region`, `cloud.account.id`, `cloud.platform`, `cloud.availability_zone`, `host.image.id`, and `host.name` are auto-detected. ASG name requires manual `OTEL_RESOURCE_ATTRIBUTES` or a custom resource detector. |
+
+### EC2 ASG Instrumentation Notes
+
+The EC2 ASG pricing service uses vanilla OTel auto-instrumentation with zero custom code or resource attributes. Here is what the OTel `ec2` resource detector and Python auto-instrumentors provide out of the box:
+
+**Resource attributes (from `ec2` detector):**
+- `cloud.provider`, `cloud.platform` (aws_ec2), `cloud.region`, `cloud.availability_zone`, `cloud.account.id`
+- `host.id` (instance ID), `host.type` (e.g. t3.small), `host.name` (private DNS), `host.image.id` (AMI)
+
+**Not available from vanilla OTel on EC2:**
+- Auto Scaling Group name — no built-in detector
+- Instance tags — EC2 resource detector doesn't read tags
+- Launch template name/version
+
+**Flask auto-instrumentor (`opentelemetry.instrumentation.flask`) provides:**
+- `http.method`, `http.route`, `http.status_code`, `http.target`, `http.scheme`
+- `net.host.name`, `net.host.port`, `net.peer.ip`, `net.peer.port`
+- `http.user_agent`, `http.flavor`
+- Span name format: `{METHOD} {route}` (e.g. `GET /price`)
+
+**Botocore auto-instrumentor (`opentelemetry.instrumentation.botocore`) provides:**
+- `rpc.system` (aws-api), `rpc.service` (DynamoDB/S3), `rpc.method` (PutItem/GetObject)
+- `db.system` (dynamodb), `db.operation` (PutItem/GetItem/Scan)
+- `aws.dynamodb.table_names` (array of table names)
+- `server.address`, `server.port`, `http.status_code`
+- `aws.request_id`, `retry_attempts`
+- Note: S3 bucket name is NOT captured by the Python botocore instrumentor (Java does capture it)
+
+**EC2 ASG collector architecture:**
+The pricing service runs two Docker containers on each EC2 instance:
+1. `pricing` — Flask app with `opentelemetry-instrument` CLI (sends OTLP HTTP to localhost:4318)
+2. `otel-collector` — `otel/opentelemetry-collector-contrib` with sigv4auth, ec2 resource detection, exports to X-Ray and CloudWatch Metrics
+
+This mirrors the ECS sidecar pattern but uses Docker host networking (`172.17.0.1:4318`) instead of localhost since the containers are on the Docker bridge network.
 
 ## OTel Collector Configuration
 
