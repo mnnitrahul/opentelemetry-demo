@@ -4,6 +4,7 @@ Provides product pricing lookups with DynamoDB storage and S3 catalog reads.
 Designed to run behind an ALB on an Auto Scaling Group.
 """
 import json, os, logging, time
+from decimal import Decimal
 import boto3
 from flask import Flask, request, jsonify
 from opentelemetry import trace
@@ -18,17 +19,28 @@ REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 tracer = trace.get_tracer(__name__)
 app = Flask(__name__)
+app.json.sort_keys = False
+
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return float(o)
+        return super().default(o)
+
+
+app.json_encoder = DecimalEncoder
 
 dynamodb = boto3.resource('dynamodb', region_name=REGION)
 s3_client = boto3.client('s3', region_name=REGION)
 
 # Seed pricing data on startup
 SEED_PRICES = {
-    "OLJCESPC7Z": {"name": "Sunglasses", "price": 19.99, "currency": "USD"},
-    "66VCHSJNUP": {"name": "Tank Top", "price": 18.99, "currency": "USD"},
-    "1YMWWN1N4O": {"name": "Watch", "price": 109.99, "currency": "USD"},
-    "L9ECAV7KIM": {"name": "Loafers", "price": 89.99, "currency": "USD"},
-    "2ZYFJ3GM2N": {"name": "Hairdryer", "price": 24.99, "currency": "USD"},
+    "OLJCESPC7Z": {"name": "Sunglasses", "price": Decimal("19.99"), "currency": "USD"},
+    "66VCHSJNUP": {"name": "Tank Top", "price": Decimal("18.99"), "currency": "USD"},
+    "1YMWWN1N4O": {"name": "Watch", "price": Decimal("109.99"), "currency": "USD"},
+    "L9ECAV7KIM": {"name": "Loafers", "price": Decimal("89.99"), "currency": "USD"},
+    "2ZYFJ3GM2N": {"name": "Hairdryer", "price": Decimal("24.99"), "currency": "USD"},
 }
 
 
@@ -61,7 +73,7 @@ def get_price():
         resp = table.get_item(Key={"productId": product_id})
         item = resp.get('Item')
         if item:
-            steps.append(f"dynamodb: found {item['name']} @ {item['price']} {item['currency']}")
+            steps.append(f"dynamodb: found {item['name']} @ {float(item['price'])} {item['currency']}")
         else:
             steps.append("dynamodb: product not found")
     except Exception as e:
