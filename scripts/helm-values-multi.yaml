@@ -33,6 +33,10 @@ opentelemetry-collector:
     processors:
       resourcedetection:
         detectors: [env, system, eks, ec2]
+        ec2:
+          tags:
+            - ^aws:autoscaling:groupName$
+            - ^kubernetes.io/cluster/.*$
     connectors:
       spanmetrics:
         dimensions:

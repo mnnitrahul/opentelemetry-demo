@@ -345,7 +345,7 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 XRAY_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/otel-collector-xray-policy"
 
 # Create or update X-Ray + CloudWatch IAM policy
-XRAY_POLICY_DOC='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets","cloudwatch:*"],"Resource":"*"}]}'
+XRAY_POLICY_DOC='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets","cloudwatch:*","ec2:DescribeTags"],"Resource":"*"}]}'
 if ! aws iam get-policy --policy-arn "${XRAY_POLICY_ARN}" &>/dev/null; then
   XRAY_POLICY_ARN=$(aws iam create-policy --policy-name otel-collector-xray-policy \
     --policy-document "${XRAY_POLICY_DOC}" \

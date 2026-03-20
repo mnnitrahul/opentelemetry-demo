@@ -121,6 +121,9 @@ Resources:
             processors:
               resourcedetection:
                 detectors: [env, ec2]
+                ec2:
+                  tags:
+                    - ^aws:autoscaling:groupName$
                 timeout: 5s
                 override: false
             extensions:

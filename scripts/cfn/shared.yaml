@@ -445,6 +445,11 @@ Resources:
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
                 Resource: '*'
+              - Sid: Ec2DescribeTags
+                Effect: Allow
+                Action:
+                  - ec2:DescribeTags
+                Resource: '*'
 
   Ec2InstanceProfile:
     Type: AWS::IAM::InstanceProfile

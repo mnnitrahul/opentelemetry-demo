@@ -214,7 +214,8 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 | Kinesis stream name missing | Python | botocore instrumentor doesn't capture `kinesis.stream_name`. Java does. |
 | Vert.x PG shows as UnknownRemoteService | Java/Vert.x | Vert.x SQL client instrumentation doesn't set `db.system`, `server.address`, `db.name`. JDBC does. |
 | Flask high-cardinality operations | Python | Unmatched routes use raw path as span name (100+ bot operations). Spring Boot normalizes to `/**`. |
-| EC2 ASG name not auto-detected | Python/All | The OTel `ec2` resource detector does not discover the Auto Scaling Group name. Only `host.id`, `host.type`, `cloud.region`, `cloud.account.id`, `cloud.platform`, `cloud.availability_zone`, `host.image.id`, and `host.name` are auto-detected. ASG name requires manual `OTEL_RESOURCE_ATTRIBUTES` or a custom resource detector. |
+| EC2 ASG name not auto-detected | Python/All | The OTel `ec2` resource detector does not discover the Auto Scaling Group name by default. Use the `ec2` detector's `tags` config with regex `^aws:autoscaling:groupName$` to read the ASG-applied instance tag via `ec2:DescribeTags`. This is a standard collector config, not custom code. |
+| EKS cluster name not auto-detected | All | The OTel `eks` detector cannot auto-detect the cluster name. Use the `ec2` detector's `tags` config with regex `^kubernetes.io/cluster/.*$` to read the EKS-applied instance tag. The cluster name appears in the tag key (e.g. `ec2.tag.kubernetes.io/cluster/otel-demo-multi: owned`). Requires `ec2:DescribeTags` permission on the collector's IAM role. |
 
 ### EC2 ASG Instrumentation Notes
 
@@ -224,10 +225,13 @@ The EC2 ASG pricing service uses vanilla OTel auto-instrumentation with zero cus
 - `cloud.provider`, `cloud.platform` (aws_ec2), `cloud.region`, `cloud.availability_zone`, `cloud.account.id`
 - `host.id` (instance ID), `host.type` (e.g. t3.small), `host.name` (private DNS), `host.image.id` (AMI)
 
-**Not available from vanilla OTel on EC2:**
-- Auto Scaling Group name — no built-in detector
-- Instance tags — EC2 resource detector doesn't read tags
+**Not available from vanilla OTel on EC2 (without tag detection):**
+- Instance tags — requires `ec2` detector `tags` config + `ec2:DescribeTags` permission
 - Launch template name/version
+
+**Available via `ec2` detector tag detection (standard collector config, no custom code):**
+- ASG name — read from `aws:autoscaling:groupName` tag (auto-applied by ASG)
+- EKS cluster name — read from `kubernetes.io/cluster/<name>` tag (auto-applied by EKS)
 
 **Flask auto-instrumentor (`opentelemetry.instrumentation.flask`) provides:**
 - `http.method`, `http.route`, `http.status_code`, `http.target`, `http.scheme`
