@@ -7,6 +7,7 @@ import json, os, logging, time
 from decimal import Decimal
 import boto3
 from flask import Flask, request, jsonify
+import flask.json.provider
 from opentelemetry import trace
 
 logging.basicConfig(level=logging.INFO)
@@ -22,14 +23,16 @@ app = Flask(__name__)
 app.json.sort_keys = False
 
 
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
+class DecimalProvider(flask.json.provider.DefaultJSONProvider):
+    @staticmethod
+    def default(o):
         if isinstance(o, Decimal):
             return float(o)
-        return super().default(o)
+        raise TypeError(f"Object of type {type(o)} is not JSON serializable")
 
 
-app.json_encoder = DecimalEncoder
+app.json_provider_class = DecimalProvider
+app.json = DecimalProvider(app)
 
 dynamodb = boto3.resource('dynamodb', region_name=REGION)
 s3_client = boto3.client('s3', region_name=REGION)

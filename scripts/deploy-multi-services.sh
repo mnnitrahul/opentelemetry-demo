@@ -224,7 +224,6 @@ aws cloudformation deploy --region "${REGION}" --stack-name otel-demo-ec2-pricin
   --no-fail-on-empty-changeset \
   --parameter-overrides \
     "PricingImage=${PRICING_IMAGE}" \
-    "OtelCollectorEndpoint=" \
     "S3BucketName=${S3_BUCKET}"
 
 PRICING_ALB=$(aws cloudformation describe-stacks --stack-name otel-demo-ec2-pricing --region "${REGION}" \

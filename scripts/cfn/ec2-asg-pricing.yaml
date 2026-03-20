@@ -5,10 +5,6 @@ Parameters:
   PricingImage:
     Type: String
     Description: ECR image URI for pricing-service
-  OtelCollectorEndpoint:
-    Type: String
-    Default: ''
-    Description: OTel Collector OTLP HTTP endpoint
   S3BucketName:
     Type: String
     Default: ''
@@ -99,6 +95,9 @@ Resources:
           Arn: !ImportValue OtelDemoEc2InstanceProfileArn
         SecurityGroupIds:
           - !ImportValue OtelDemoEc2InstanceSG
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
@@ -163,7 +162,7 @@ Resources:
             docker run -d --restart always --name otel-collector \
               -p 4317:4317 -p 4318:4318 \
               -v /tmp/otel-config.yaml:/etc/otel/config.yaml \
-              otel/opentelemetry-collector-contrib:latest \
+              otel/opentelemetry-collector-contrib:0.148.0 \
               --config /etc/otel/config.yaml
 
             # Run pricing service pointing to local collector
