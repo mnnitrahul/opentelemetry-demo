@@ -36,7 +36,7 @@ opentelemetry-collector:
         ec2:
           tags:
             - ^aws:autoscaling:groupName$
-            - ^kubernetes.io/cluster/.*$
+            - ^eks:cluster-name$
     connectors:
       spanmetrics:
         dimensions:

@@ -215,7 +215,7 @@ Every 10th iteration (~5 min): calls /order-slow, /order-java-slow, /order-vertx
 | Vert.x PG shows as UnknownRemoteService | Java/Vert.x | Vert.x SQL client instrumentation doesn't set `db.system`, `server.address`, `db.name`. JDBC does. |
 | Flask high-cardinality operations | Python | Unmatched routes use raw path as span name (100+ bot operations). Spring Boot normalizes to `/**`. |
 | EC2 ASG name not auto-detected | Python/All | The OTel `ec2` resource detector does not discover the Auto Scaling Group name by default. Use the `ec2` detector's `tags` config with regex `^aws:autoscaling:groupName$` to read the ASG-applied instance tag via `ec2:DescribeTags`. This is a standard collector config, not custom code. Verified: appears as `ec2.tag.aws:autoscaling:groupName` in resource attributes (e.g. `otel-demo-ec2-pricing-ASG-W75BotPu561M`). |
-| EKS cluster name not auto-detected | All | The OTel `eks` detector cannot auto-detect the cluster name. Use the `ec2` detector's `tags` config with regex `^kubernetes.io/cluster/.*$` to read the EKS-applied instance tag. Verified: appears as `ec2.tag.kubernetes.io/cluster/otel-demo-multi: owned`. Also picks up the EKS node group ASG name via `ec2.tag.aws:autoscaling:groupName` (e.g. `eks-ng-43c6d686-...`). Requires `ec2:DescribeTags` on the collector's IRSA policy. |
+| EKS cluster name not auto-detected | All | The OTel `eks` detector cannot auto-detect the cluster name. Use the `ec2` detector's `tags` config with regex `^eks:cluster-name$` to read the EKS-applied instance tag. Verified: appears as `ec2.tag.eks:cluster-name: otel-demo-multi`. Requires `ec2:DescribeTags` on the collector's IRSA policy. |
 
 ### EC2 ASG Instrumentation Notes
 
@@ -231,7 +231,7 @@ The EC2 ASG pricing service uses vanilla OTel auto-instrumentation with zero cus
 
 **Available via `ec2` detector tag detection (standard collector config, no custom code):**
 - ASG name — read from `aws:autoscaling:groupName` tag (auto-applied by ASG)
-- EKS cluster name — read from `kubernetes.io/cluster/<name>` tag (auto-applied by EKS)
+- EKS cluster name — read from `eks:cluster-name` tag (auto-applied by EKS, value is the cluster name directly)
 
 **Flask auto-instrumentor (`opentelemetry.instrumentation.flask`) provides:**
 - `http.method`, `http.route`, `http.status_code`, `http.target`, `http.scheme`

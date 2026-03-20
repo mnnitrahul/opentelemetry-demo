@@ -79,7 +79,7 @@ opentelemetry-collector:
         ec2:
           tags:
             - ^aws:autoscaling:groupName$
-            - ^kubernetes.io/cluster/.*$
+            - ^eks:cluster-name$
 
     # [5] Span Metrics: Add dependency and operation dimensions
     connectors:
