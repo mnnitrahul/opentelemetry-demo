@@ -251,10 +251,10 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
           Subnets:
-            - !ImportValue OtelDemoPublicSubnet1
-            - !ImportValue OtelDemoPublicSubnet2
+            - !ImportValue OtelDemoPrivateSubnet1
+            - !ImportValue OtelDemoPrivateSubnet2
           SecurityGroups:
             - !ImportValue OtelDemoEcsTaskSG
       LoadBalancers:
@@ -376,10 +376,10 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
           Subnets:
-            - !ImportValue OtelDemoPublicSubnet1
-            - !ImportValue OtelDemoPublicSubnet2
+            - !ImportValue OtelDemoPrivateSubnet1
+            - !ImportValue OtelDemoPrivateSubnet2
           SecurityGroups:
             - !ImportValue OtelDemoEcsTaskSG
       LoadBalancers:
@@ -556,10 +556,10 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
           Subnets:
-            - !ImportValue OtelDemoPublicSubnet1
-            - !ImportValue OtelDemoPublicSubnet2
+            - !ImportValue OtelDemoPrivateSubnet1
+            - !ImportValue OtelDemoPrivateSubnet2
           SecurityGroups:
             - !ImportValue OtelDemoEcsTaskSG
       LoadBalancers:
@@ -724,10 +724,10 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
           Subnets:
-            - !ImportValue OtelDemoPublicSubnet1
-            - !ImportValue OtelDemoPublicSubnet2
+            - !ImportValue OtelDemoPrivateSubnet1
+            - !ImportValue OtelDemoPrivateSubnet2
           SecurityGroups:
             - !ImportValue OtelDemoEcsTaskSG
       LoadBalancers:
