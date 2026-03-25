@@ -106,6 +106,8 @@ public class OrderController {
                 props.put("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
                 props.put("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
                 props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 10000);
+                props.put("allow.auto.create.topics", "true");
+                props.put("client.dns.lookup", "use_all_dns_ips");
                 kafkaProducer = new KafkaProducer<>(props);
                 log.info("MSK Kafka connected: {}", mskBootstrap);
             } catch (Exception e) {
