@@ -6,6 +6,9 @@ import io.opentelemetry.api.trace.Tracer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,6 +111,29 @@ public class OrderController {
                 props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 10000);
                 props.put("allow.auto.create.topics", "true");
                 props.put("client.dns.lookup", "use_all_dns_ips");
+
+                // Ensure topic exists via AdminClient
+                try {
+                    Properties adminProps = new Properties();
+                    adminProps.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, mskBootstrap);
+                    adminProps.put("security.protocol", "SASL_SSL");
+                    adminProps.put("sasl.mechanism", "AWS_MSK_IAM");
+                    adminProps.put("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
+                    adminProps.put("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+                    adminProps.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, 15000);
+                    try (AdminClient admin = AdminClient.create(adminProps)) {
+                        if (!admin.listTopics().names().get(15, java.util.concurrent.TimeUnit.SECONDS).contains("otel-demo-orders")) {
+                            admin.createTopics(List.of(new NewTopic("otel-demo-orders", 1, (short) 1)))
+                                 .all().get(15, java.util.concurrent.TimeUnit.SECONDS);
+                            log.info("MSK topic 'otel-demo-orders' created");
+                        } else {
+                            log.info("MSK topic 'otel-demo-orders' already exists");
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("MSK topic creation check failed (will try producing anyway): {}", e.getMessage());
+                }
+
                 kafkaProducer = new KafkaProducer<>(props);
                 log.info("MSK Kafka connected: {}", mskBootstrap);
             } catch (Exception e) {
