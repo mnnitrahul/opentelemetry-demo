@@ -531,28 +531,15 @@ Metrics from the following sources are successfully ingested into Zeus (`granite
 | App (HTTP) | `http.server.request.duration`, `http.client.duration` | ~90+ |
 | App (RPC) | `rpc.server.duration`, `rpc.client.duration` | ~70+ |
 
-**Sample PromQL queries** (use the Zeus/Prometheus datasource in Grafana):
+### Issue 1: Zeus rejects array and map attribute values
 
-```promql
-# HTTP request duration by service
-{__name__="http.server.request.duration"}
+**Severity:** High — causes entire metric batches to be dropped silently.
 
-# CPU usage per pod
-{__name__="k8s.pod.cpu.usage"}
+**Problem:** Zeus accepts `string`, `int`, `bool`, and `double` OTLP attribute value types but rejects `array` (arrayValue) and `map` (kvlistValue) types with HTTP 400, dropping the **entire ResourceMetrics entry** (not just the bad attribute).
 
-# Memory by node
-{__name__="k8s.node.memory.usage"}
+**Error message:** `Attribute value type is invalid [ResourceMetrics.1].` — does not identify which attribute is invalid.
 
-# Filter by service (note: dotted label names must be quoted)
-{__name__="rpc.server.duration", "rpc.service"="oteldemo.AdService"}
-
-# Filter by k8s resource attributes
-{__name__="k8s.pod.cpu.usage", "@resource.service.name"="frontend"}
-```
-
-### Known Issue: Zeus rejects array and map attribute values
-
-Zeus accepts `string`, `int`, `bool`, and `double` OTLP attribute value types. It rejects `array` (arrayValue) and `map` (kvlistValue) types, returning HTTP 400 for the **entire metric batch** containing any invalid attribute.
+**Impact:** Standard OTel receivers emit array-type attributes by design. Without a workaround, ALL metrics from affected resources are lost.
 
 Known array-type attributes from standard OTel receivers/detectors:
 
@@ -566,23 +553,73 @@ Known array-type attributes from standard OTel receivers/detectors:
 | `aws.log.group.arns` | `[]string` | `resourcedetection` ECS detector |
 | `aws.log.stream.arns` | `[]string` | `resourcedetection` ECS detector |
 
-**Current workaround:** A `transform/zeus` processor in the collector config that:
-- Deletes array-type resource attributes (`host.ip`, `host.mac`, `process.command_args`)
-- Replaces blank string attributes with `"unknown"` (from spanmetrics empty dimensions)
+**Workaround:** `transform/zeus` processor that deletes array-type attributes before export. See `helm-values-xray.yaml`.
 
-**Impact:** Some metric batches containing resources with undiscovered array/map attributes may still be dropped. Spanmetrics (`calls`, `duration_milliseconds_*`) are also affected.
+**Ask:** Zeus should drop the invalid attribute and ingest the metric with remaining valid attributes, not reject the entire batch. The error message should identify which attribute is invalid.
 
-### Follow-up: Zeus should drop invalid attributes, not entire batches
+### Issue 2: Zeus rejects blank string attribute values
 
-**Request to Zeus team:** When Zeus encounters an attribute with an invalid value type (non-string), it should:
-1. Drop the invalid **attribute** (not the entire datapoint or batch)
-2. Ingest the metric datapoint with the remaining valid attributes
-3. Return a warning in the partial success response identifying the dropped attributes
+**Severity:** Medium — causes partial data loss from spanmetrics.
 
-Current behavior (HTTP 400 rejecting entire `ResourceMetrics` entries) is overly aggressive and causes significant data loss. A single bad attribute on one resource causes all metrics sharing that resource to be dropped. This is especially problematic because:
-- Standard OTel receivers emit array-type attributes by design (e.g., `host.ip`, `host.mac`, `process.command_args`)
-- Customers cannot easily discover which attributes are array/map type without trial and error
-- The error message (`Attribute value type is invalid [ResourceMetrics.1]`) doesn't identify which attribute is invalid
-- Zeus correctly accepts `string`, `int`, `bool`, `double` — only `array` and `map` (kvlist) are rejected
+**Problem:** Zeus rejects datapoints with blank string (`""`) attribute values. The `spanmetrics` connector emits `""` for dimension attributes not present on the original span (e.g., `peer.service=""` when the span has no peer).
+
+**Error message:** `Attribute string value cannot be blank [ResourceMetrics.1.ScopeMetrics.8.Metrics.2.Datapoint.1].`
+
+**Impact:** Spanmetrics-generated metrics (`calls`, `duration_milliseconds_*`) are partially dropped. These are critical for RED (Rate/Error/Duration) metrics derived from traces.
+
+**Workaround:** `transform/zeus` processor with `replace_all_patterns(attributes, "value", "^$", "unknown")` to replace blank strings with `"unknown"`.
+
+**Ask:** Zeus should either accept blank strings or drop the blank attribute and ingest the datapoint.
+
+### Issue 3: `StartTimeUnixNano` must be strictly less than `TimeUnixNano`
+
+**Severity:** Low — only affects manual/test metric publishing.
+
+**Problem:** Zeus returns HTTP 400 if `startTimeUnixNano >= timeUnixNano` on a datapoint. The OTLP spec allows them to be equal for cumulative metrics where the start and observation time are the same.
+
+**Error message:** `StartTimeUnixNano cannot be greater than or equal to TimeUnixNano [ResourceMetrics.1.ScopeMetrics.1.Metrics.1.Datapoint.1].`
+
+**Workaround:** Ensure `startTimeUnixNano` is at least 1ns before `timeUnixNano`.
+
+### Issue 4: No wildcard metric name queries in PromQL
+
+**Severity:** Low — affects metric discovery UX.
+
+**Problem:** Zeus PromQL does not support `{__name__=~".+"}` or similar wildcard queries to list all available metric names. Returns `Selector must have a metric name`.
+
+**Impact:** Users cannot discover what metrics are available without knowing exact names. No equivalent of Prometheus's `/api/v1/label/__name__/values` endpoint.
+
+**Workaround:** Query specific known metric names individually, or use `group by ("@resource.service.name") ({__name__="known.metric"})` to explore.
+
+### Issue 5: PromQL requires special syntax for OTel metric/label names
+
+**Severity:** Low — UX friction for users familiar with standard PromQL.
+
+**Problem:** OTel metric names contain dots (e.g., `http.server.duration`) and Zeus label names use `@` prefix (e.g., `@resource.service.name`). Standard PromQL identifiers only support `[a-zA-Z_:]`. Users must use:
+- `{__name__="metric.with.dots"}` instead of `metric_with_dots`
+- `{"label.with.dots"="value"}` with quoted label names
+- `{"@resource.service.name"="value"}` for resource attributes
+
+**Impact:** Every query requires the verbose `{__name__="..."}` syntax. Grafana Builder mode doesn't work — must use Code mode.
+
+### Issue 6: Short metric retention in PreProd
+
+**Severity:** Info — PreProd behavior only.
+
+**Problem:** Metrics published to the PreProd endpoint (`granite.amazonaws.com`) appear to have very short retention. A metric published manually disappeared within minutes and was only visible immediately after publishing.
+
+**Impact:** Continuous metric emission is required. One-off test metrics vanish quickly.
+
+### Issue 7: ECS CloudFormation task definition updates don't force redeployment
+
+**Severity:** Medium — operational issue, not Zeus-specific.
+
+**Problem:** When updating the OTel collector config embedded in an ECS task definition via CloudFormation, CFN may report "No updates to be performed" even though the inline config changed. Even when a new task definition revision is created, ECS services don't automatically redeploy.
+
+**Workaround:** After CFN update, manually force redeployment:
+```bash
+aws ecs update-service --cluster <cluster> --service <service> --force-new-deployment
+```
+Or register a new task definition revision manually and update the service.
 
 **Contact:** aws-zeus-collective@amazon.com / CTI: AWS / CloudWatch / Eolas - Operations
