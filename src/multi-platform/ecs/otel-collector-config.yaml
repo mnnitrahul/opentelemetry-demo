@@ -8,7 +8,7 @@ receivers:
 
 extensions:
   sigv4auth:
-    region: ${AWS_REGION}
+    region: us-west-2
     service: xray
 
 exporters:

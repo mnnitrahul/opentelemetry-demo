@@ -7,10 +7,10 @@
 
 extensions:
   sigv4auth:
-    region: us-east-1
+    region: us-west-2
     service: xray
   sigv4auth/metrics:
-    region: us-east-1
+    region: us-west-2
     service: monitoring
 
 exporters:

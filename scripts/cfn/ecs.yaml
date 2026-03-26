@@ -227,10 +227,10 @@ Resources:
                           - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: xray
                   sigv4auth/metrics:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: monitoring
                 exporters:
                   otlphttp/xray:
@@ -368,10 +368,10 @@ Resources:
                           - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: xray
                   sigv4auth/metrics:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: monitoring
                 exporters:
                   otlphttp/xray:
@@ -561,10 +561,10 @@ Resources:
                           - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: xray
                   sigv4auth/metrics:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: monitoring
                 exporters:
                   otlphttp/xray:
@@ -745,10 +745,10 @@ Resources:
                           - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: xray
                   sigv4auth/metrics:
-                    region: ${AWS_REGION}
+                    region: us-west-2
                     service: monitoring
                 exporters:
                   otlphttp/xray:
