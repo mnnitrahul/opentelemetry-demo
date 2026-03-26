@@ -516,3 +516,61 @@ kubectl port-forward -n otel-demo svc/frontend-proxy 8081:8080
 - **EKS 403 on kubectl:** Scripts auto-create access entries. Manual: `aws eks create-access-entry` + `associate-access-policy`
 - **CFN ROLLBACK_COMPLETE:** Scripts auto-delete and recreate
 - **Lambda errors:** Ensure requirements.txt has `aws-xray-sdk>=2.12.0`
+
+## Zeus (CloudWatch Metrics via OTLP) — Known Issues & Follow-ups
+
+### Working
+
+Metrics from the following sources are successfully ingested into Zeus (`granite.amazonaws.com`) and queryable via PromQL on AWS Managed Grafana:
+
+| Category | Sample Metrics | Series Count |
+|----------|---------------|--------------|
+| Host metrics | `system.cpu.time`, `system.memory.usage`, `system.disk.io`, `system.network.io` | ~900+ |
+| K8s pod/node | `k8s.pod.cpu.usage`, `k8s.node.memory.usage`, `k8s.node.memory.working_set` | ~350+ |
+| K8s cluster | `k8s.deployment.available`, `k8s.deployment.desired`, `k8s.container.cpu_limit` | ~230+ |
+| App (HTTP) | `http.server.request.duration`, `http.client.duration` | ~90+ |
+| App (RPC) | `rpc.server.duration`, `rpc.client.duration` | ~70+ |
+
+**Sample PromQL queries** (use the Zeus/Prometheus datasource in Grafana):
+
+```promql
+# HTTP request duration by service
+{__name__="http.server.request.duration"}
+
+# CPU usage per pod
+{__name__="k8s.pod.cpu.usage"}
+
+# Memory by node
+{__name__="k8s.node.memory.usage"}
+
+# Filter by service (note: dotted label names must be quoted)
+{__name__="rpc.server.duration", "rpc.service"="oteldemo.AdService"}
+
+# Filter by k8s resource attributes
+{__name__="k8s.pod.cpu.usage", "@resource.service.name"="frontend"}
+```
+
+### Known Issue: Zeus rejects non-string attribute values
+
+Zeus only accepts string-type OTLP attribute values. Standard OTel receivers (`hostmetrics`, `kubeletstats`, `k8s_cluster`, `resourcedetection`) emit int, bool, and array attribute types (e.g., `host.cpu.family` as int, `host.ip` as string array). Zeus returns HTTP 400 and rejects the **entire metric batch** containing any invalid attribute.
+
+**Current workaround:** A `transform/zeus` processor in the collector config (see `helm-values-xray.yaml`) that:
+- Replaces blank string attributes with `"unknown"` (from spanmetrics empty dimensions)
+- Converts known int resource attributes to strings via `Concat()`
+- Deletes array-type resource attributes (`host.ip`, `host.mac`)
+
+**Impact:** Some metric batches (primarily from `kubeletstats` and `k8s_cluster` receivers) are still dropped due to undiscovered non-string attributes. Spanmetrics (`calls`, `duration_milliseconds_*`) are also affected.
+
+### Follow-up: Zeus should drop invalid attributes, not entire batches
+
+**Request to Zeus team:** When Zeus encounters an attribute with an invalid value type (non-string), it should:
+1. Drop the invalid **attribute** (not the entire datapoint or batch)
+2. Ingest the metric datapoint with the remaining valid attributes
+3. Return a warning in the partial success response identifying the dropped attributes
+
+Current behavior (HTTP 400 rejecting entire `ResourceMetrics` entries) is overly aggressive and causes significant data loss. A single bad attribute on one resource causes all metrics sharing that resource to be dropped. This is especially problematic because:
+- Standard OTel receivers emit non-string types by design (per OTel semantic conventions)
+- Customers cannot easily discover which attributes are non-string without trial and error
+- The error message (`Attribute value type is invalid [ResourceMetrics.1]`) doesn't identify which attribute is invalid
+
+**Contact:** aws-zeus-collective@amazon.com / CTI: AWS / CloudWatch / Eolas - Operations

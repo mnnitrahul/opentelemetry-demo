@@ -125,6 +125,17 @@ Resources:
                     - ^aws:autoscaling:groupName$
                 timeout: 5s
                 override: false
+              transform/zeus:
+                error_mode: ignore
+                metric_statements:
+                  - context: datapoint
+                    statements:
+                      - replace_all_patterns(attributes, "value", "^$", "unknown")
+                  - context: resource
+                    statements:
+                      - replace_all_patterns(attributes, "value", "^$", "unknown")
+                      - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
+                      - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
             extensions:
               sigv4auth:
                 region: AWS_REGION_PLACEHOLDER
@@ -153,7 +164,7 @@ Resources:
                   exporters: [otlphttp/xray, debug]
                 metrics:
                   receivers: [otlp]
-                  processors: [resourcedetection]
+                  processors: [resourcedetection, transform/zeus]
                   exporters: [otlphttp/cloudwatch-metrics, debug]
             OTELEOF
             sed -i "s/AWS_REGION_PLACEHOLDER/${AWS::Region}/g" /tmp/otel-config.yaml

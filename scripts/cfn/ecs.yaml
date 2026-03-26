@@ -209,6 +209,17 @@ Resources:
                     detectors: [env, ecs, ec2]
                     timeout: 5s
                     override: false
+                  transform/zeus:
+                    error_mode: ignore
+                    metric_statements:
+                      - context: datapoint
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                      - context: resource
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                          - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
+                          - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -237,7 +248,7 @@ Resources:
                       exporters: [otlphttp/xray, debug]
                     metrics:
                       receivers: [otlp]
-                      processors: [resourcedetection]
+                      processors: [resourcedetection, transform/zeus]
                       exporters: [otlphttp/cloudwatch-metrics, debug]
 
   OrderService:
@@ -334,6 +345,17 @@ Resources:
                     detectors: [env, ecs, ec2]
                     timeout: 5s
                     override: false
+                  transform/zeus:
+                    error_mode: ignore
+                    metric_statements:
+                      - context: datapoint
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                      - context: resource
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                          - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
+                          - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -362,7 +384,7 @@ Resources:
                       exporters: [otlphttp/xray, debug]
                     metrics:
                       receivers: [otlp]
-                      processors: [resourcedetection]
+                      processors: [resourcedetection, transform/zeus]
                       exporters: [otlphttp/cloudwatch-metrics, debug]
 
   InventoryService:
@@ -511,6 +533,17 @@ Resources:
                     detectors: [env, ecs, ec2]
                     timeout: 5s
                     override: false
+                  transform/zeus:
+                    error_mode: ignore
+                    metric_statements:
+                      - context: datapoint
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                      - context: resource
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                          - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
+                          - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -539,7 +572,7 @@ Resources:
                       exporters: [otlphttp/xray, debug]
                     metrics:
                       receivers: [otlp]
-                      processors: [resourcedetection]
+                      processors: [resourcedetection, transform/zeus]
                       exporters: [otlphttp/cloudwatch-metrics, debug]
                     logs:
                       receivers: [otlp]
@@ -679,6 +712,17 @@ Resources:
                     detectors: [env, ecs, ec2]
                     timeout: 5s
                     override: false
+                  transform/zeus:
+                    error_mode: ignore
+                    metric_statements:
+                      - context: datapoint
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                      - context: resource
+                        statements:
+                          - replace_all_patterns(attributes, "value", "^$", "unknown")
+                          - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
+                          - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -707,7 +751,7 @@ Resources:
                       exporters: [otlphttp/xray, debug]
                     metrics:
                       receivers: [otlp]
-                      processors: [resourcedetection]
+                      processors: [resourcedetection, transform/zeus]
                       exporters: [otlphttp/cloudwatch-metrics, debug]
                     logs:
                       receivers: [otlp]
