@@ -44,16 +44,16 @@ opentelemetry-collector:
     # [2] SigV4: AWS request signing for OTLP endpoints
     extensions:
       sigv4auth:
-        region: us-west-2
+        region: us-east-1
         service: xray
       sigv4auth/metrics:
-        region: us-west-2
+        region: us-east-1
         service: monitoring
 
     # [3] X-Ray + CloudWatch Metrics: Standard OTLP exporters pointed at AWS endpoints
     exporters:
       otlphttp/xray:
-        endpoint: https://xray-beta.us-west-2.amazonaws.com
+        endpoint: https://xray.us-east-1.amazonaws.com
         auth:
           authenticator: sigv4auth
       otlphttp/cloudwatch-metrics:
