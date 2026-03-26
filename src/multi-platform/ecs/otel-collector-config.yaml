@@ -10,18 +10,25 @@ extensions:
   sigv4auth:
     region: us-east-1
     service: xray
+  sigv4auth/xray-beta:
+    region: us-west-2
+    service: xray
 
 exporters:
   otlphttp/xray:
     endpoint: https://xray.us-east-1.amazonaws.com
     auth:
       authenticator: sigv4auth
+  otlphttp/xray-beta:
+    endpoint: https://xray-beta.us-west-2.amazonaws.com
+    auth:
+      authenticator: sigv4auth/xray-beta
   debug:
     verbosity: basic
 
 service:
-  extensions: [sigv4auth]
+  extensions: [sigv4auth, sigv4auth/xray-beta]
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [otlphttp/xray, debug]
+      exporters: [otlphttp/xray, otlphttp/xray-beta, debug]

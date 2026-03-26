@@ -9,6 +9,9 @@ extensions:
   sigv4auth:
     region: us-east-1
     service: xray
+  sigv4auth/xray-beta:
+    region: us-west-2
+    service: xray
   sigv4auth/metrics:
     region: us-east-1
     service: monitoring
@@ -18,6 +21,10 @@ exporters:
     endpoint: https://xray.us-east-1.amazonaws.com
     auth:
       authenticator: sigv4auth
+  otlphttp/xray-beta:
+    endpoint: https://xray-beta.us-west-2.amazonaws.com
+    auth:
+      authenticator: sigv4auth/xray-beta
   otlphttp/cloudwatch-metrics:
     endpoint: https://granite.amazonaws.com
     compression: gzip
@@ -25,9 +32,9 @@ exporters:
       authenticator: sigv4auth/metrics
 
 service:
-  extensions: [sigv4auth, sigv4auth/metrics]
+  extensions: [sigv4auth, sigv4auth/xray-beta, sigv4auth/metrics]
   pipelines:
     traces:
-      exporters: [otlp_grpc/jaeger, spanmetrics, otlphttp/xray, debug]
+      exporters: [otlp_grpc/jaeger, spanmetrics, otlphttp/xray, otlphttp/xray-beta, debug]
     metrics:
       exporters: [otlp_http/prometheus, debug, otlphttp/cloudwatch-metrics]

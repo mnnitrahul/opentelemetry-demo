@@ -129,10 +129,15 @@ helm install otel-demo open-telemetry/opentelemetry-demo \
   --set opentelemetry-collector.serviceAccount.name="${COLLECTOR_SA_NAME}" \
   --set opentelemetry-collector.config.extensions.sigv4auth.region="us-east-1" \
   --set opentelemetry-collector.config.extensions.sigv4auth.service=xray \
+  --set 'opentelemetry-collector.config.extensions.sigv4auth/xray-beta.region=us-west-2' \
+  --set 'opentelemetry-collector.config.extensions.sigv4auth/xray-beta.service=xray' \
   --set 'opentelemetry-collector.config.exporters.otlphttp/xray.endpoint=https://xray.us-east-1.amazonaws.com' \
   --set 'opentelemetry-collector.config.exporters.otlphttp/xray.auth.authenticator=sigv4auth' \
+  --set 'opentelemetry-collector.config.exporters.otlphttp/xray-beta.endpoint=https://xray-beta.us-west-2.amazonaws.com' \
+  --set 'opentelemetry-collector.config.exporters.otlphttp/xray-beta.auth.authenticator=sigv4auth/xray-beta' \
   --set 'opentelemetry-collector.config.service.extensions[0]=health_check' \
   --set 'opentelemetry-collector.config.service.extensions[1]=sigv4auth' \
+  --set 'opentelemetry-collector.config.service.extensions[2]=sigv4auth/xray-beta' \
   --wait \
   --timeout 10m
 
