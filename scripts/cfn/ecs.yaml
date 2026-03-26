@@ -221,6 +221,10 @@ Resources:
                           - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
                           - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                           - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
+                          - delete_key(attributes, "aws.log.group.names") where attributes["aws.log.group.names"] != nil
+                          - delete_key(attributes, "aws.log.stream.names") where attributes["aws.log.stream.names"] != nil
+                          - delete_key(attributes, "aws.log.group.arns") where attributes["aws.log.group.arns"] != nil
+                          - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -358,6 +362,10 @@ Resources:
                           - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
                           - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                           - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
+                          - delete_key(attributes, "aws.log.group.names") where attributes["aws.log.group.names"] != nil
+                          - delete_key(attributes, "aws.log.stream.names") where attributes["aws.log.stream.names"] != nil
+                          - delete_key(attributes, "aws.log.group.arns") where attributes["aws.log.group.arns"] != nil
+                          - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -547,6 +555,10 @@ Resources:
                           - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
                           - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                           - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
+                          - delete_key(attributes, "aws.log.group.names") where attributes["aws.log.group.names"] != nil
+                          - delete_key(attributes, "aws.log.stream.names") where attributes["aws.log.stream.names"] != nil
+                          - delete_key(attributes, "aws.log.group.arns") where attributes["aws.log.group.arns"] != nil
+                          - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}
@@ -727,6 +739,10 @@ Resources:
                           - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
                           - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
                           - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
+                          - delete_key(attributes, "aws.log.group.names") where attributes["aws.log.group.names"] != nil
+                          - delete_key(attributes, "aws.log.stream.names") where attributes["aws.log.stream.names"] != nil
+                          - delete_key(attributes, "aws.log.group.arns") where attributes["aws.log.group.arns"] != nil
+                          - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
                 extensions:
                   sigv4auth:
                     region: ${AWS_REGION}

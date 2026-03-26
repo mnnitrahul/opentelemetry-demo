@@ -560,7 +560,11 @@ Known array-type attributes from standard OTel receivers/detectors:
 |-----------|------|--------|
 | `host.ip` | `[]string` | `resourcedetection` system detector |
 | `host.mac` | `[]string` | `resourcedetection` system detector |
-| `process.command_args` | `[]string` | `resourcedetection` process detector |
+| `process.command_args` | `[]string` | `resourcedetection` process detector / Python SDK |
+| `aws.log.group.names` | `[]string` | `resourcedetection` ECS detector |
+| `aws.log.stream.names` | `[]string` | `resourcedetection` ECS detector |
+| `aws.log.group.arns` | `[]string` | `resourcedetection` ECS detector |
+| `aws.log.stream.arns` | `[]string` | `resourcedetection` ECS detector |
 
 **Current workaround:** A `transform/zeus` processor in the collector config that:
 - Deletes array-type resource attributes (`host.ip`, `host.mac`, `process.command_args`)

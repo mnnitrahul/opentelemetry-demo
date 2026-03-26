@@ -93,9 +93,13 @@ opentelemetry-collector:
       #
       # Known array-type attributes from OTel receivers/detectors:
       #   Resource level:
-      #     host.ip              - []string (system detector)
-      #     host.mac             - []string (system detector)
-      #     process.command_args - []string (process detector)
+      #     host.ip                - []string (system detector)
+      #     host.mac               - []string (system detector)
+      #     process.command_args   - []string (process detector / Python SDK)
+      #     aws.log.group.names    - []string (ECS detector)
+      #     aws.log.stream.names   - []string (ECS detector)
+      #     aws.log.group.arns     - []string (ECS detector)
+      #     aws.log.stream.arns    - []string (ECS detector)
       #   Datapoint level:
       #     (none standard, but app SDKs may emit custom arrays)
       #
@@ -117,6 +121,10 @@ opentelemetry-collector:
               - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
               - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
               - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
+              - delete_key(attributes, "aws.log.group.names") where attributes["aws.log.group.names"] != nil
+              - delete_key(attributes, "aws.log.stream.names") where attributes["aws.log.stream.names"] != nil
+              - delete_key(attributes, "aws.log.group.arns") where attributes["aws.log.group.arns"] != nil
+              - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
 
     # [5] Span Metrics: Add dependency and operation dimensions
     connectors:
