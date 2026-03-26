@@ -15,7 +15,7 @@ extensions:
 
 exporters:
   otlphttp/xray:
-    endpoint: https://xray.us-east-1.amazonaws.com
+    endpoint: https://xray-beta.us-west-2.amazonaws.com
     auth:
       authenticator: sigv4auth
   otlphttp/cloudwatch-metrics:

@@ -13,7 +13,7 @@ extensions:
 
 exporters:
   otlphttp/xray:
-    endpoint: https://xray.${AWS_REGION}.amazonaws.com
+    endpoint: https://xray-beta.us-west-2.amazonaws.com
     auth:
       authenticator: sigv4auth
   debug:

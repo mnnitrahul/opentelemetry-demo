@@ -150,7 +150,7 @@ Resources:
                 service: monitoring
             exporters:
               otlphttp/xray:
-                endpoint: https://xray.AWS_REGION_PLACEHOLDER.amazonaws.com
+                endpoint: https://xray-beta.us-west-2.amazonaws.com
                 auth:
                   authenticator: sigv4auth
               otlphttp/cloudwatch-metrics:
