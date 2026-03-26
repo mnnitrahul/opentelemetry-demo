@@ -1,1382 +1,281 @@
 # Zeus PromQL Query Reference
 
-All queries use the **Zeus** (Prometheus) datasource in AWS Managed Grafana.
-Use **Code mode** in Grafana Explorer. Metric names with dots require `{__name__="..."}` syntax.
+Datasource: **Zeus** (Prometheus) in AWS Managed Grafana. Use **Code mode**.
 
-## Conventions
+## Service Inventory
 
-| Metric | Semconv | Status Code Label | Route/Method Label |
-|--------|---------|-------------------|--------------------|
-| `http.server.duration` | old | `http.status_code` | `http.method`, `http.route` |
-| `http.server.request.duration` | new | `http.response.status_code` | `http.request.method`, `http.route` |
-| `rpc.server.duration` | — | `rpc.grpc.status_code` | `rpc.service`, `rpc.method` |
-| `http.client.duration` | old | `http.status_code` | `http.method`, `net.peer.name` |
-| `rpc.client.duration` | — | `rpc.grpc.status_code` | `rpc.service`, `rpc.method` |
+| Service | Platform | Server Metric | Operations | HTTP Dependencies | RPC Dependencies |
+|---------|----------|---------------|------------|-------------------|------------------|
+| `ad` | EKS | `rpc.server.duration` | `oteldemo.AdService/GetAds` | — | `flagd/Service` |
+| `cart` | EKS | `http.server.request.duration` | `POST /oteldemo.CartService/AddItem`, `POST /oteldemo.CartService/EmptyCart`, `POST /oteldemo.CartService/GetCart` | — | — |
+| `checkout` | EKS | `rpc.server.duration` | `oteldemo.CheckoutService/PlaceOrder` | — | `CartService`, `CurrencyService`, `PaymentService`, `ProductCatalogService` |
+| `flagd` | EKS | `http.server.request.duration` | `POST /flagd.evaluation.v1.Service/EventStream`, `POST /flagd.evaluation.v1.Service/ResolveAll`, `POST /flagd.evaluation.v1.Service/ResolveBoolean`, `POST /flagd.evaluation.v1.Service/ResolveFloat` +1 | — | — |
+| `frontend` | EKS | `http.server.duration` | `GET`, `POST` | `kubernetes` | — |
+| `multi-ad` | EKS-multi | `rpc.server.duration` | `oteldemo.AdService/GetAds` | — | `flagd/Service` |
+| `multi-checkout` | EKS-multi | `rpc.server.duration` | `oteldemo.CheckoutService/PlaceOrder` | — | `CartService`, `CurrencyService`, `PaymentService`, `ProductCatalogService` |
+| `multi-frontend` | EKS-multi | `http.server.duration` | `GET`, `POST` | `kubernetes` | — |
+| `multi-inventory-service` | ECS | `http.server.duration` | `GET` | — | — |
+| `multi-order-processor` | ECS | `http.server.duration` | `GET`, `POST` | `5qrun1snxd`, `otel-demo-multi-ecs-alb-1127414257` | — |
+| `multi-order-processor-java` | ECS | `http.server.request.duration` | `GET /health`, `GET /order-java`, `GET /order-java-slow` | — | — |
+| `multi-order-processor-vertx` | ECS | `http.server.request.duration` | `GET /health`, `GET /order-vertx`, `GET /order-vertx-native-db`, `GET /order-vertx-rx-db` +1 | — | — |
+| `multi-pricing-service` | ASG | `http.server.duration` | `GET`, `HEAD`, `OPTIONS`, `POST` +1 | — | — |
+| `multi-product-catalog` | EKS-multi | `rpc.server.duration` | `oteldemo.ProductCatalogService/GetProduct`, `oteldemo.ProductCatalogService/ListProducts` | — | — |
+| `multi-shipping` | EKS-multi | `http.server.duration` | `/get-quote`, `/ship-order` | — | — |
+| `product-catalog` | EKS | `rpc.server.duration` | `oteldemo.ProductCatalogService/GetProduct`, `oteldemo.ProductCatalogService/ListProducts` | — | — |
+| `shipping` | EKS | `http.server.duration` | `/get-quote`, `/ship-order` | — | — |
 
----
+## Dependency Operations
 
-## `ad`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="ad"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="ad"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="ad", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Operations
-
-RPC operations: `oteldemo.AdService/GetAds`
-
-**p99 by RPC operation**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="ad"}))
-```
-
-**count by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="ad"})
-```
-
-**errors (non-OK) by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="ad", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Dependencies
-
-RPC dependencies: `flagd.evaluation.v1.Service`
-
-**p99 by RPC dependency**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", le) ({__name__="rpc.client.duration", "@resource.service.name"="ad"}))
-```
-
-**count by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="ad"})
-```
-
-**errors (non-OK) by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `flagd/Service`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.service"="flagd.evaluation.v1.Service"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.service"="flagd.evaluation.v1.Service"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.service"="flagd.evaluation.v1.Service", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`EventStream`, `ResolveBoolean`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.service"="flagd.evaluation.v1.Service"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.service"="flagd.evaluation.v1.Service"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="ad", "rpc.service"="flagd.evaluation.v1.Service", "rpc.grpc.status_code"!="0"})
-```
+| Caller | Dependency | Operations |
+|--------|------------|------------|
+| `ad` | `flagd/Service` | `EventStream`, `ResolveBoolean` |
+| `checkout` | `CartService` | `EmptyCart`, `GetCart` |
+| `checkout` | `CurrencyService` | `Convert` |
+| `checkout` | `PaymentService` | `Charge` |
+| `checkout` | `ProductCatalogService` | `GetProduct` |
+| `frontend` | `kubernetes.default.svc` | HTTP calls |
+| `multi-ad` | `flagd/Service` | `EventStream`, `ResolveBoolean` |
+| `multi-checkout` | `CartService` | `EmptyCart`, `GetCart` |
+| `multi-checkout` | `CurrencyService` | `Convert` |
+| `multi-checkout` | `PaymentService` | `Charge` |
+| `multi-checkout` | `ProductCatalogService` | `GetProduct` |
+| `multi-frontend` | `kubernetes.default.svc` | HTTP calls |
+| `multi-order-processor` | `5qrun1snxd` | HTTP calls |
+| `multi-order-processor` | `otel-demo-multi-ecs-alb-1127414257` | HTTP calls |
 
 ---
 
-## `cart`
+## Query Templates
 
-### Service Level
+Replace `<SVC>`, `<METRIC>`, `<STATUS>`, `<ROUTE_LABEL>`, `<DEP>`, `<DEP_LABEL>` with values from the tables above.
 
-**p99**
+### Variable Reference
+
+| Variable | Old HTTP Semconv | New HTTP Semconv | gRPC |
+|----------|-----------------|------------------|------|
+| `<METRIC>` | `http.server.duration` | `http.server.request.duration` | `rpc.server.duration` |
+| `<CLIENT_METRIC>` | `http.client.duration` | `http.client.duration` | `rpc.client.duration` |
+| `<STATUS>` | `http.status_code` | `http.response.status_code` | `rpc.grpc.status_code` |
+| `<ROUTE_LABEL>` | `http.route` | `http.route` | `rpc.service`, `rpc.method` |
+| `<DEP_LABEL>` | `net.peer.name` | `net.peer.name` | `rpc.service` |
+
+### 1. Service Level
+
+**P99 Latency**
 ```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.request.duration", "@resource.service.name"="cart"}))
+histogram_quantile(0.99, sum by (le) ({__name__="<METRIC>", "@resource.service.name"="<SVC>"}))
 ```
 
-**count**
+**Request Count**
 ```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="cart"})
+sum ({__name__="<METRIC>", "@resource.service.name"="<SVC>"})
 ```
 
-**4xx**
+**4xx Count** (HTTP only)
 ```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="cart", "http.response.status_code"=~"4.."})
+sum ({__name__="<METRIC>", "@resource.service.name"="<SVC>", "<STATUS>"=~"4.."})
 ```
 
-**5xx**
+**5xx Count** (HTTP only)
 ```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="cart", "http.response.status_code"=~"5.."})
+sum ({__name__="<METRIC>", "@resource.service.name"="<SVC>", "<STATUS>"=~"5.."})
 ```
 
-### Service Operations
-
-Operations: `POST /oteldemo.CartService/AddItem`, `POST /oteldemo.CartService/EmptyCart`, `POST /oteldemo.CartService/GetCart`
-
-**p99 by operation**
+**Error Count** (gRPC)
 ```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.request.duration", "@resource.service.name"="cart"}))
+sum ({__name__="rpc.server.duration", "@resource.service.name"="<SVC>", "rpc.grpc.status_code"!="0"})
 ```
 
-**count by operation**
+### 2. Service Operation
+
+**P99 Latency by operation** (HTTP)
 ```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="cart"})
+histogram_quantile(0.99, sum by ("http.route", le) ({__name__="<METRIC>", "@resource.service.name"="<SVC>"}))
 ```
 
-**4xx by operation**
+**P99 Latency by operation** (gRPC)
 ```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="cart", "http.response.status_code"=~"4.."})
+histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="<SVC>"}))
 ```
 
-**5xx by operation**
+**Request Count by operation** (HTTP)
 ```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="cart", "http.response.status_code"=~"5.."})
+sum by ("http.route") ({__name__="<METRIC>", "@resource.service.name"="<SVC>"})
 ```
+
+**Request Count by operation** (gRPC)
+```promql
+sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="<SVC>"})
+```
+
+**5xx by operation** (HTTP)
+```promql
+sum by ("http.route") ({__name__="<METRIC>", "@resource.service.name"="<SVC>", "<STATUS>"=~"5.."})
+```
+
+**Errors by operation** (gRPC)
+```promql
+sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="<SVC>", "rpc.grpc.status_code"!="0"})
+```
+
+### 3. Service Dependency
+
+**P99 Latency by dependency** (HTTP)
+```promql
+histogram_quantile(0.99, sum by ("net.peer.name", le) ({__name__="http.client.duration", "@resource.service.name"="<SVC>"}))
+```
+
+**P99 Latency by dependency** (gRPC)
+```promql
+histogram_quantile(0.99, sum by ("rpc.service", le) ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>"}))
+```
+
+**Request Count by dependency** (HTTP)
+```promql
+sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="<SVC>"})
+```
+
+**Request Count by dependency** (gRPC)
+```promql
+sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>"})
+```
+
+**5xx by dependency** (HTTP)
+```promql
+sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="<SVC>", "http.status_code"=~"5.."})
+```
+
+**Errors by dependency** (gRPC)
+```promql
+sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>", "rpc.grpc.status_code"!="0"})
+```
+
+### 4. Specific Dependency
+
+**P99 Latency to specific dependency** (HTTP)
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="<SVC>", "net.peer.name"="<DEP>"}))
+```
+
+**P99 Latency to specific dependency** (gRPC)
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>", "rpc.service"="<DEP>"}))
+```
+
+**Request Count to specific dependency**
+```promql
+sum ({__name__="<CLIENT_METRIC>", "@resource.service.name"="<SVC>", "<DEP_LABEL>"="<DEP>"})
+```
+
+**5xx to specific dependency** (HTTP)
+```promql
+sum ({__name__="http.client.duration", "@resource.service.name"="<SVC>", "net.peer.name"="<DEP>", "http.status_code"=~"5.."})
+```
+
+**Errors to specific dependency** (gRPC)
+```promql
+sum ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>", "rpc.service"="<DEP>", "rpc.grpc.status_code"!="0"})
+```
+
+### 5. Dependency Operation
+
+**P99 Latency by dependency method** (gRPC)
+```promql
+histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>", "rpc.service"="<DEP>"}))
+```
+
+**Request Count by dependency method**
+```promql
+sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>", "rpc.service"="<DEP>"})
+```
+
+**Errors by dependency method**
+```promql
+sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="<SVC>", "rpc.service"="<DEP>", "rpc.grpc.status_code"!="0"})
+```
+
+### 6. Service Operation → Dependency Operation
+
+Not available from metrics alone. The client-side metrics (`rpc.client.duration`) carry the caller's
+service name and the dependency's method, but not the caller's own operation/route. This correlation
+requires trace-level data (joining caller span with client span).
 
 ---
 
-## `checkout`
+## Concrete Examples
 
-### Service Level
+### `checkout`
 
-**p99**
+**Service p99**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="checkout"}))
 ```
 
-**count**
+**Service count**
 ```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout"})
 ```
 
-**errors (non-OK)**
+**Service errors**
 ```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.grpc.status_code"!="0"})
 ```
 
-### Service Operations
-
-RPC operations: `oteldemo.CheckoutService/PlaceOrder`
-
-**p99 by RPC operation**
+**By operation**
 ```promql
-histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="checkout"}))
+sum by ("rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="checkout"})
 ```
 
-**count by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="checkout"})
-```
-
-**errors (non-OK) by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Dependencies
-
-RPC dependencies: `oteldemo.CartService`, `oteldemo.CurrencyService`, `oteldemo.PaymentService`, `oteldemo.ProductCatalogService`
-
-**p99 by RPC dependency**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout"}))
-```
-
-**count by RPC dependency**
+**All deps**
 ```promql
 sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="checkout"})
 ```
 
-**errors (non-OK) by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `CartService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CartService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CartService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CartService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`EmptyCart`, `GetCart`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CartService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CartService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CartService", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `CurrencyService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CurrencyService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CurrencyService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CurrencyService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`Convert`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CurrencyService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CurrencyService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.CurrencyService", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `PaymentService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.PaymentService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.PaymentService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.PaymentService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`Charge`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.PaymentService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.PaymentService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.PaymentService", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `ProductCatalogService`
-
-**p99**
+**→ ProductCatalog p99**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"}))
 ```
 
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`GetProduct`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"}))
-```
-
-**count by method**
+**→ ProductCatalog by method**
 ```promql
 sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"})
 ```
 
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.grpc.status_code"!="0"})
-```
+### `frontend`
 
----
-
-## `flagd`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.request.duration", "@resource.service.name"="flagd"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="flagd"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="flagd", "http.response.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="flagd", "http.response.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `POST /flagd.evaluation.v1.Service/EventStream`, `POST /flagd.evaluation.v1.Service/ResolveAll`, `POST /flagd.evaluation.v1.Service/ResolveBoolean`, `POST /flagd.evaluation.v1.Service/ResolveFloat`, `POST /flagd.evaluation.v1.Service/ResolveInt`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.request.duration", "@resource.service.name"="flagd"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="flagd"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="flagd", "http.response.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="flagd", "http.response.status_code"=~"5.."})
-```
-
----
-
-## `frontend`
-
-### Service Level
-
-**p99**
+**Service p99**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="frontend"}))
 ```
 
-**count**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="frontend"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"4.."})
-```
-
-**5xx**
+**Service 5xx**
 ```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"5.."})
 ```
 
-### Service Operations
-
-Operations: `GET unknown`, `POST unknown`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="frontend"}))
-```
-
-**count by operation**
+**By route**
 ```promql
 sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="frontend"})
 ```
 
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"5.."})
-```
-
-### Service Dependencies
-
-HTTP dependencies: `kubernetes.default.svc`
-
-**p99 by dependency**
-```promql
-histogram_quantile(0.99, sum by ("net.peer.name", le) ({__name__="http.client.duration", "@resource.service.name"="frontend"}))
-```
-
-**count by dependency**
+**All HTTP deps**
 ```promql
 sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="frontend"})
 ```
 
-**4xx by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="frontend", "http.status_code"=~"4.."})
-```
+### `multi-order-processor`
 
-**5xx by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="frontend", "http.status_code"=~"5.."})
-```
-
-#### → `kubernetes.default.svc`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc", "http.status_code"=~"5.."})
-```
-
----
-
-## `multi-ad`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="multi-ad"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="multi-ad"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="multi-ad", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Operations
-
-RPC operations: `oteldemo.AdService/GetAds`
-
-**p99 by RPC operation**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="multi-ad"}))
-```
-
-**count by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="multi-ad"})
-```
-
-**errors (non-OK) by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="multi-ad", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Dependencies
-
-RPC dependencies: `flagd.evaluation.v1.Service`
-
-**p99 by RPC dependency**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad"}))
-```
-
-**count by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad"})
-```
-
-**errors (non-OK) by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `flagd/Service`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.service"="flagd.evaluation.v1.Service"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.service"="flagd.evaluation.v1.Service"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.service"="flagd.evaluation.v1.Service", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`EventStream`, `ResolveBoolean`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.service"="flagd.evaluation.v1.Service"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.service"="flagd.evaluation.v1.Service"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-ad", "rpc.service"="flagd.evaluation.v1.Service", "rpc.grpc.status_code"!="0"})
-```
-
----
-
-## `multi-checkout`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="multi-checkout"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="multi-checkout"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="multi-checkout", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Operations
-
-RPC operations: `oteldemo.CheckoutService/PlaceOrder`
-
-**p99 by RPC operation**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="multi-checkout"}))
-```
-
-**count by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="multi-checkout"})
-```
-
-**errors (non-OK) by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="multi-checkout", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Dependencies
-
-RPC dependencies: `oteldemo.CartService`, `oteldemo.CurrencyService`, `oteldemo.PaymentService`, `oteldemo.ProductCatalogService`
-
-**p99 by RPC dependency**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout"}))
-```
-
-**count by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout"})
-```
-
-**errors (non-OK) by RPC dependency**
-```promql
-sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `CartService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CartService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CartService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CartService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`EmptyCart`, `GetCart`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CartService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CartService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CartService", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `CurrencyService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CurrencyService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CurrencyService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CurrencyService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`Convert`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CurrencyService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CurrencyService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.CurrencyService", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `PaymentService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.PaymentService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.PaymentService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.PaymentService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`Charge`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.PaymentService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.PaymentService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.PaymentService", "rpc.grpc.status_code"!="0"})
-```
-
-#### → `ProductCatalogService`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.ProductCatalogService"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.ProductCatalogService"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.grpc.status_code"!="0"})
-```
-
-**By dependency operation** (`GetProduct`)
-
-**p99 by method**
-```promql
-histogram_quantile(0.99, sum by ("rpc.method", le) ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.ProductCatalogService"}))
-```
-
-**count by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.ProductCatalogService"})
-```
-
-**errors (non-OK) by method**
-```promql
-sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="multi-checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.grpc.status_code"!="0"})
-```
-
----
-
-## `multi-frontend`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-frontend"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-frontend"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-frontend", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-frontend", "http.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `GET unknown`, `POST unknown`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="multi-frontend"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-frontend"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-frontend", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-frontend", "http.status_code"=~"5.."})
-```
-
-### Service Dependencies
-
-HTTP dependencies: `kubernetes.default.svc`
-
-**p99 by dependency**
-```promql
-histogram_quantile(0.99, sum by ("net.peer.name", le) ({__name__="http.client.duration", "@resource.service.name"="multi-frontend"}))
-```
-
-**count by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-frontend"})
-```
-
-**4xx by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-frontend", "http.status_code"=~"4.."})
-```
-
-**5xx by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-frontend", "http.status_code"=~"5.."})
-```
-
-#### → `kubernetes.default.svc`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-frontend", "net.peer.name"="kubernetes.default.svc"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-frontend", "net.peer.name"="kubernetes.default.svc"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-frontend", "net.peer.name"="kubernetes.default.svc", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-frontend", "net.peer.name"="kubernetes.default.svc", "http.status_code"=~"5.."})
-```
-
----
-
-## `multi-inventory-service`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service", "http.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `GET unknown`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-inventory-service", "http.status_code"=~"5.."})
-```
-
----
-
-## `multi-order-processor`
-
-### Service Level
-
-**p99**
+**Service p99 (ECS)**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"}))
 ```
 
-**count**
+**Service count**
 ```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"})
 ```
 
-**4xx**
+**Dep: ECS ALB 5xx**
 ```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"4.."})
+sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
 ```
-
-**5xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `GET unknown`, `POST unknown`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
-```
-
-### Service Dependencies
-
-HTTP dependencies: `5qrun1snxd.execute-api.us-east-1.amazonaws.com`, `otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com`
-
-**p99 by dependency**
-```promql
-histogram_quantile(0.99, sum by ("net.peer.name", le) ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor"}))
-```
-
-**count by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor"})
-```
-
-**4xx by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"4.."})
-```
-
-**5xx by dependency**
-```promql
-sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
-```
-
-#### → `5qrun1snxd.execute-api.us-east-1.amazonaws.com`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com", "http.status_code"=~"5.."})
-```
-
-#### → `otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com`
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com", "http.status_code"=~"5.."})
-```
-
----
-
-## `multi-order-processor-java`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java", "http.response.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java", "http.response.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `GET /health`, `GET /order-java`, `GET /order-java-slow`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java", "http.response.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-java", "http.response.status_code"=~"5.."})
-```
-
----
-
-## `multi-order-processor-vertx`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx", "http.response.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx", "http.response.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `GET /health`, `GET /order-vertx`, `GET /order-vertx-native-db`, `GET /order-vertx-rx-db`, `GET /order-vertx-slow`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx", "http.response.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.request.duration", "@resource.service.name"="multi-order-processor-vertx", "http.response.status_code"=~"5.."})
-```
-
----
-
-## `multi-pricing-service`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service", "http.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: `GET unknown`, `HEAD unknown`, `OPTIONS unknown`, `POST unknown`, `_OTHER unknown`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-pricing-service", "http.status_code"=~"5.."})
-```
-
----
-
-## `multi-product-catalog`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="multi-product-catalog"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="multi-product-catalog"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="multi-product-catalog", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Operations
-
-RPC operations: `oteldemo.ProductCatalogService/GetProduct`, `oteldemo.ProductCatalogService/ListProducts`
-
-**p99 by RPC operation**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="multi-product-catalog"}))
-```
-
-**count by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="multi-product-catalog"})
-```
-
-**errors (non-OK) by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="multi-product-catalog", "rpc.grpc.status_code"!="0"})
-```
-
----
-
-## `multi-shipping`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-shipping"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-shipping"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-shipping", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="multi-shipping", "http.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: ` /get-quote`, ` /ship-order`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="multi-shipping"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-shipping"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-shipping", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="multi-shipping", "http.status_code"=~"5.."})
-```
-
----
-
-## `product-catalog`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="product-catalog"}))
-```
-
-**count**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="product-catalog"})
-```
-
-**errors (non-OK)**
-```promql
-sum ({__name__="rpc.server.duration", "@resource.service.name"="product-catalog", "rpc.grpc.status_code"!="0"})
-```
-
-### Service Operations
-
-RPC operations: `oteldemo.ProductCatalogService/GetProduct`, `oteldemo.ProductCatalogService/ListProducts`
-
-**p99 by RPC operation**
-```promql
-histogram_quantile(0.99, sum by ("rpc.service", "rpc.method", le) ({__name__="rpc.server.duration", "@resource.service.name"="product-catalog"}))
-```
-
-**count by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="product-catalog"})
-```
-
-**errors (non-OK) by RPC operation**
-```promql
-sum by ("rpc.service", "rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="product-catalog", "rpc.grpc.status_code"!="0"})
-```
-
----
-
-## `shipping`
-
-### Service Level
-
-**p99**
-```promql
-histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="shipping"}))
-```
-
-**count**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="shipping"})
-```
-
-**4xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="shipping", "http.status_code"=~"4.."})
-```
-
-**5xx**
-```promql
-sum ({__name__="http.server.duration", "@resource.service.name"="shipping", "http.status_code"=~"5.."})
-```
-
-### Service Operations
-
-Operations: ` /get-quote`, ` /ship-order`
-
-**p99 by operation**
-```promql
-histogram_quantile(0.99, sum by ("http.route", le) ({__name__="http.server.duration", "@resource.service.name"="shipping"}))
-```
-
-**count by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="shipping"})
-```
-
-**4xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="shipping", "http.status_code"=~"4.."})
-```
-
-**5xx by operation**
-```promql
-sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="shipping", "http.status_code"=~"5.."})
-```
-
----
