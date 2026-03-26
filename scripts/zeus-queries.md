@@ -209,14 +209,26 @@ requires trace-level data (joining caller span with client span).
 **1. Service level — p99, count, errors**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="checkout"}))
+```
+
+```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout"})
+```
+
+```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.grpc.status_code"!="0"})
 ```
 
 **2. Single operation — `PlaceOrder` only**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.method"="PlaceOrder"}))
+```
+
+```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.method"="PlaceOrder"})
+```
+
+```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.method"="PlaceOrder", "rpc.grpc.status_code"!="0"})
 ```
 
@@ -233,14 +245,26 @@ sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name
 **5. Single dependency — `checkout` → `ProductCatalogService`**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"}))
+```
+
+```promql
 sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"})
+```
+
+```promql
 sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.grpc.status_code"!="0"})
 ```
 
 **6. Single dependency operation — `checkout` → `ProductCatalogService/GetProduct`**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.method"="GetProduct"}))
+```
+
+```promql
 sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.method"="GetProduct"})
+```
+
+```promql
 sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.method"="GetProduct", "rpc.grpc.status_code"!="0"})
 ```
 
@@ -262,15 +286,30 @@ you need trace-level correlation (joining the server span with the client span).
 **1. Service level — p99, count, 5xx, 4xx**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="frontend"}))
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend"})
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"5.."})
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"4.."})
 ```
 
 **2. Single operation — `GET /api/cart`**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.route"="/api/cart", "http.method"="GET"}))
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.route"="/api/cart", "http.method"="GET"})
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.route"="/api/cart", "http.method"="GET", "http.status_code"=~"5.."})
 ```
 
@@ -287,7 +326,13 @@ sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.n
 **5. Single dependency — `frontend` → `kubernetes.default.svc`**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc"}))
+```
+
+```promql
 sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc"})
+```
+
+```promql
 sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc", "http.status_code"=~"5.."})
 ```
 
@@ -298,13 +343,22 @@ sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net
 **1. Service level**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"}))
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"})
+```
+
+```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
 ```
 
 **2. Single dependency — ECS ALB**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com"}))
+```
+
+```promql
 sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com", "http.status_code"=~"5.."})
 ```
 
@@ -320,11 +374,17 @@ sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.n
 **2. Single dependency — API Gateway (Lambda)**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com"}))
+```
+
+```promql
 sum ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com", "http.status_code"=~"5.."})
 ```
 
 **3. Single dependency — ASG pricing service**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="otel-demo-pricing-alb-1201708054.us-east-1.elb.amazonaws.com"}))
+```
+
+```promql
 sum ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="otel-demo-pricing-alb-1201708054.us-east-1.elb.amazonaws.com", "http.status_code"=~"5.."})
 ```
