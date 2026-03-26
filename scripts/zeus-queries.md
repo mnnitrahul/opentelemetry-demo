@@ -204,78 +204,127 @@ requires trace-level data (joining caller span with client span).
 
 ## Concrete Examples
 
-### `checkout`
+### `checkout` (gRPC service)
 
-**Service p99**
+**1. Service level — p99, count, errors**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="checkout"}))
-```
-
-**Service count**
-```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout"})
-```
-
-**Service errors**
-```promql
 sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.grpc.status_code"!="0"})
 ```
 
-**By operation**
+**2. Single operation — `PlaceOrder` only**
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.method"="PlaceOrder"}))
+sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.method"="PlaceOrder"})
+sum ({__name__="rpc.server.duration", "@resource.service.name"="checkout", "rpc.method"="PlaceOrder", "rpc.grpc.status_code"!="0"})
+```
+
+**3. All operations (breakdown)**
 ```promql
 sum by ("rpc.method") ({__name__="rpc.server.duration", "@resource.service.name"="checkout"})
 ```
 
-**All deps**
+**4. All dependencies (breakdown)**
 ```promql
 sum by ("rpc.service") ({__name__="rpc.client.duration", "@resource.service.name"="checkout"})
 ```
 
-**→ ProductCatalog p99**
+**5. Single dependency — `checkout` → `ProductCatalogService`**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"}))
+sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"})
+sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.grpc.status_code"!="0"})
 ```
 
-**→ ProductCatalog by method**
+**6. Single dependency operation — `checkout` → `ProductCatalogService/GetProduct`**
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.method"="GetProduct"}))
+sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.method"="GetProduct"})
+sum ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService", "rpc.method"="GetProduct", "rpc.grpc.status_code"!="0"})
+```
+
+**7. All dependency operations (breakdown) — `checkout` → `ProductCatalogService` by method**
 ```promql
 sum by ("rpc.method") ({__name__="rpc.client.duration", "@resource.service.name"="checkout", "rpc.service"="oteldemo.ProductCatalogService"})
 ```
 
-### `frontend`
+**8. Service operation → dependency operation**
 
-**Service p99**
+Not available from metrics. The `rpc.client.duration` metric carries the caller service name and the
+dependency method, but not the caller's own operation. To get "checkout/PlaceOrder → ProductCatalogService/GetProduct"
+you need trace-level correlation (joining the server span with the client span).
+
+---
+
+### `frontend` (HTTP service)
+
+**1. Service level — p99, count, 5xx, 4xx**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="frontend"}))
-```
-
-**Service 5xx**
-```promql
+sum ({__name__="http.server.duration", "@resource.service.name"="frontend"})
 sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"5.."})
+sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.status_code"=~"4.."})
 ```
 
-**By route**
+**2. Single operation — `GET /api/cart`**
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.route"="/api/cart", "http.method"="GET"}))
+sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.route"="/api/cart", "http.method"="GET"})
+sum ({__name__="http.server.duration", "@resource.service.name"="frontend", "http.route"="/api/cart", "http.method"="GET", "http.status_code"=~"5.."})
+```
+
+**3. All operations (breakdown)**
 ```promql
 sum by ("http.route") ({__name__="http.server.duration", "@resource.service.name"="frontend"})
 ```
 
-**All HTTP deps**
+**4. All HTTP dependencies (breakdown)**
 ```promql
 sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="frontend"})
 ```
 
-### `multi-order-processor`
+**5. Single dependency — `frontend` → `kubernetes.default.svc`**
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc"}))
+sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc"})
+sum ({__name__="http.client.duration", "@resource.service.name"="frontend", "net.peer.name"="kubernetes.default.svc", "http.status_code"=~"5.."})
+```
 
-**Service p99 (ECS)**
+---
+
+### `multi-order-processor` (ECS HTTP service)
+
+**1. Service level**
 ```promql
 histogram_quantile(0.99, sum by (le) ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"}))
-```
-
-**Service count**
-```promql
 sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor"})
+sum ({__name__="http.server.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
 ```
 
-**Dep: ECS ALB 5xx**
+**2. Single dependency — ECS ALB**
 ```promql
-sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "http.status_code"=~"5.."})
+histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com"}))
+sum ({__name__="http.client.duration", "@resource.service.name"="multi-order-processor", "net.peer.name"="otel-demo-multi-ecs-alb-1127414257.us-east-1.elb.amazonaws.com", "http.status_code"=~"5.."})
+```
+
+---
+
+### `multi-platform-caller` (cross-platform caller)
+
+**1. All dependencies (ECS ALB, ASG ALB, API Gateway)**
+```promql
+sum by ("net.peer.name") ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller"})
+```
+
+**2. Single dependency — API Gateway (Lambda)**
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com"}))
+sum ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="5qrun1snxd.execute-api.us-east-1.amazonaws.com", "http.status_code"=~"5.."})
+```
+
+**3. Single dependency — ASG pricing service**
+```promql
+histogram_quantile(0.99, sum by (le) ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="otel-demo-pricing-alb-1201708054.us-east-1.elb.amazonaws.com"}))
+sum ({__name__="http.client.duration", "@resource.service.name"="multi-platform-caller", "net.peer.name"="otel-demo-pricing-alb-1201708054.us-east-1.elb.amazonaws.com", "http.status_code"=~"5.."})
 ```
