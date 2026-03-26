@@ -550,16 +550,23 @@ Metrics from the following sources are successfully ingested into Zeus (`granite
 {__name__="k8s.pod.cpu.usage", "@resource.service.name"="frontend"}
 ```
 
-### Known Issue: Zeus rejects non-string attribute values
+### Known Issue: Zeus rejects array and map attribute values
 
-Zeus only accepts string-type OTLP attribute values. Standard OTel receivers (`hostmetrics`, `kubeletstats`, `k8s_cluster`, `resourcedetection`) emit int, bool, and array attribute types (e.g., `host.cpu.family` as int, `host.ip` as string array). Zeus returns HTTP 400 and rejects the **entire metric batch** containing any invalid attribute.
+Zeus accepts `string`, `int`, `bool`, and `double` OTLP attribute value types. It rejects `array` (arrayValue) and `map` (kvlistValue) types, returning HTTP 400 for the **entire metric batch** containing any invalid attribute.
 
-**Current workaround:** A `transform/zeus` processor in the collector config (see `helm-values-xray.yaml`) that:
+Known array-type attributes from standard OTel receivers/detectors:
+
+| Attribute | Type | Source |
+|-----------|------|--------|
+| `host.ip` | `[]string` | `resourcedetection` system detector |
+| `host.mac` | `[]string` | `resourcedetection` system detector |
+| `process.command_args` | `[]string` | `resourcedetection` process detector |
+
+**Current workaround:** A `transform/zeus` processor in the collector config that:
+- Deletes array-type resource attributes (`host.ip`, `host.mac`, `process.command_args`)
 - Replaces blank string attributes with `"unknown"` (from spanmetrics empty dimensions)
-- Converts known int resource attributes to strings via `Concat()`
-- Deletes array-type resource attributes (`host.ip`, `host.mac`)
 
-**Impact:** Some metric batches (primarily from `kubeletstats` and `k8s_cluster` receivers) are still dropped due to undiscovered non-string attributes. Spanmetrics (`calls`, `duration_milliseconds_*`) are also affected.
+**Impact:** Some metric batches containing resources with undiscovered array/map attributes may still be dropped. Spanmetrics (`calls`, `duration_milliseconds_*`) are also affected.
 
 ### Follow-up: Zeus should drop invalid attributes, not entire batches
 
@@ -569,8 +576,9 @@ Zeus only accepts string-type OTLP attribute values. Standard OTel receivers (`h
 3. Return a warning in the partial success response identifying the dropped attributes
 
 Current behavior (HTTP 400 rejecting entire `ResourceMetrics` entries) is overly aggressive and causes significant data loss. A single bad attribute on one resource causes all metrics sharing that resource to be dropped. This is especially problematic because:
-- Standard OTel receivers emit non-string types by design (per OTel semantic conventions)
-- Customers cannot easily discover which attributes are non-string without trial and error
+- Standard OTel receivers emit array-type attributes by design (e.g., `host.ip`, `host.mac`, `process.command_args`)
+- Customers cannot easily discover which attributes are array/map type without trial and error
 - The error message (`Attribute value type is invalid [ResourceMetrics.1]`) doesn't identify which attribute is invalid
+- Zeus correctly accepts `string`, `int`, `bool`, `double` — only `array` and `map` (kvlist) are rejected
 
 **Contact:** aws-zeus-collective@amazon.com / CTI: AWS / CloudWatch / Eolas - Operations

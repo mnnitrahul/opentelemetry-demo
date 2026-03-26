@@ -37,7 +37,7 @@ opentelemetry-collector:
           tags:
             - ^aws:autoscaling:groupName$
             - ^eks:cluster-name$
-      # Zeus compatibility: fix attributes that Zeus rejects
+      # Zeus compatibility: delete array/map attributes and replace blank strings
       transform/zeus:
         error_mode: ignore
         metric_statements:
@@ -49,16 +49,7 @@ opentelemetry-collector:
               - replace_all_patterns(attributes, "value", "^$", "unknown")
               - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
               - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
-              - set(attributes["host.cpu.family"], Concat([attributes["host.cpu.family"]], "")) where attributes["host.cpu.family"] != nil
-              - set(attributes["host.cpu.model.id"], Concat([attributes["host.cpu.model.id"]], "")) where attributes["host.cpu.model.id"] != nil
-              - set(attributes["host.cpu.model.name"], Concat([attributes["host.cpu.model.name"]], "")) where attributes["host.cpu.model.name"] != nil
-              - set(attributes["host.cpu.stepping"], Concat([attributes["host.cpu.stepping"]], "")) where attributes["host.cpu.stepping"] != nil
-              - set(attributes["host.cpu.cache.l2.size"], Concat([attributes["host.cpu.cache.l2.size"]], "")) where attributes["host.cpu.cache.l2.size"] != nil
-              - set(attributes["process.pid"], Concat([attributes["process.pid"]], "")) where attributes["process.pid"] != nil
-              - set(attributes["process.parent_pid"], Concat([attributes["process.parent_pid"]], "")) where attributes["process.parent_pid"] != nil
-              - set(attributes["process.owner"], Concat([attributes["process.owner"]], "")) where attributes["process.owner"] != nil
-              - set(attributes["k8s.container.restart_count"], Concat([attributes["k8s.container.restart_count"]], "")) where attributes["k8s.container.restart_count"] != nil
-              - delete_key(attributes, "k8s.pod.start_time") where attributes["k8s.pod.start_time"] != nil
+              - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
     connectors:
       spanmetrics:
         dimensions:

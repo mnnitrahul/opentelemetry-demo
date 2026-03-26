@@ -136,6 +136,7 @@ Resources:
                       - replace_all_patterns(attributes, "value", "^$", "unknown")
                       - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
                       - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
+                      - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
             extensions:
               sigv4auth:
                 region: AWS_REGION_PLACEHOLDER
