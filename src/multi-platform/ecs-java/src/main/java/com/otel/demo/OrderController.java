@@ -329,8 +329,8 @@ public class OrderController {
                 Map<String, Object> doc = Map.of(
                     "orderId", orderId, "status", "CREATED",
                     "platform", "ecs-java", "timestamp", timestamp);
-                opensearchClient.index(IndexRequest.of(i -> i.index("otel-demo-orders").id(orderId).document(doc)));
-                opensearchClient.search(SearchRequest.of(s -> s.index("otel-demo-orders").size(1)), Map.class);
+                opensearchClient.index(IndexRequest.of(i -> i.index("otel-demo-orders-java").id(orderId).document(doc)));
+                opensearchClient.search(SearchRequest.of(s -> s.index("otel-demo-orders-java").size(1)), Map.class);
                 steps.add("opensearch: indexed + searched");
             } catch (Exception e) {
                 steps.add("opensearch: " + e.getMessage());
