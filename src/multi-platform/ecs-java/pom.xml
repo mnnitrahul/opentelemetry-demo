@@ -77,6 +77,16 @@
             <artifactId>opensearch-java</artifactId>
             <version>2.10.4</version>
         </dependency>
+        <dependency>
+            <groupId>org.opensearch.client</groupId>
+            <artifactId>opensearch-rest-client</artifactId>
+            <version>2.12.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents.core5</groupId>
+            <artifactId>httpcore5</artifactId>
+            <version>5.2.4</version>
+        </dependency>
 
         <!-- Redis (Jedis) -->
         <dependency>
