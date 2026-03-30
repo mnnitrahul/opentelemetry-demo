@@ -18,8 +18,9 @@ import org.opensearch.client.opensearch.core.SearchRequest;
 import org.opensearch.client.opensearch.core.SearchResponse;
 import org.opensearch.client.json.jackson.JacksonJsonpMapper;
 import org.opensearch.client.transport.rest_client.RestClientTransport;
-import redis.clients.jedis.JedisPooled;
-import redis.clients.jedis.DefaultJedisClientConfig;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.sync.RedisCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -77,7 +78,7 @@ public class OrderController {
     private Connection pgConn;
     private KafkaProducer<String, String> kafkaProducer;
     private OpenSearchClient opensearchClient;
-    private JedisPooled jedis;
+    private RedisCommands<String, String> redis;
 
     @PostConstruct
     public void init() {
@@ -170,9 +171,10 @@ public class OrderController {
         if (!redisAddr.isEmpty()) {
             try {
                 String[] parts = redisAddr.split(":");
-                jedis = new JedisPooled(
-                    new redis.clients.jedis.HostAndPort(parts[0], Integer.parseInt(parts[1])),
-                    DefaultJedisClientConfig.builder().ssl(true).build());
+                RedisURI uri = RedisURI.builder()
+                    .withHost(parts[0]).withPort(Integer.parseInt(parts[1]))
+                    .withSsl(true).build();
+                redis = RedisClient.create(uri).connect().sync();
                 log.info("Redis connected: {}", redisAddr);
             } catch (Exception e) {
                 log.warn("Redis setup failed: {}", e.getMessage());
@@ -313,11 +315,11 @@ public class OrderController {
         }
 
         // Redis (provisioned ElastiCache)
-        if (jedis != null) {
+        if (redis != null) {
             try {
                 String key = "order:" + orderId;
-                jedis.setex(key, 300, orderJson);
-                jedis.get(key);
+                redis.setex(key, 300, orderJson);
+                redis.get(key);
                 steps.add("redis: cached + read");
             } catch (Exception e) {
                 steps.add("redis: " + e.getMessage());
