@@ -170,7 +170,8 @@ public class OrderController {
         if (!redisAddr.isEmpty()) {
             try {
                 String[] parts = redisAddr.split(":");
-                jedis = new JedisPooled(parts[0], Integer.parseInt(parts[1]),
+                jedis = new JedisPooled(
+                    new redis.clients.jedis.HostAndPort(parts[0], Integer.parseInt(parts[1])),
                     DefaultJedisClientConfig.builder().ssl(true).build());
                 log.info("Redis connected: {}", redisAddr);
             } catch (Exception e) {
