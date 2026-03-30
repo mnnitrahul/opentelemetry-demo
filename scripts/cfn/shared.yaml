@@ -591,7 +591,7 @@ Resources:
       ReplicationGroupId: otel-demo-redis
       Engine: redis
       CacheNodeType: cache.t3.micro
-      NumCacheClusters: 1
+      NumCacheClusters: 2
       CacheSubnetGroupName: !Ref ValkeySubnetGroup
       SecurityGroupIds:
         - !Ref ValkeySG
