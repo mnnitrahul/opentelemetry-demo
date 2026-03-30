@@ -221,7 +221,7 @@ Resources:
       EventSourceArn: !ImportValue OtelDemoMskClusterArn
       FunctionName: !Ref MskConsumerFunction
       Topics:
-        - otel-demo-orders
+        - otel-demo-orders-msk
       StartingPosition: LATEST
 
 Outputs:

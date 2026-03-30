@@ -136,12 +136,12 @@ public class OrderController {
                     adminProps.put("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
                     adminProps.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, 15000);
                     try (AdminClient admin = AdminClient.create(adminProps)) {
-                        if (!admin.listTopics().names().get(15, java.util.concurrent.TimeUnit.SECONDS).contains("otel-demo-orders")) {
-                            admin.createTopics(List.of(new NewTopic("otel-demo-orders", 1, (short) 1)))
+                        if (!admin.listTopics().names().get(15, java.util.concurrent.TimeUnit.SECONDS).contains("otel-demo-orders-msk")) {
+                            admin.createTopics(List.of(new NewTopic("otel-demo-orders-msk", 1, (short) 1)))
                                  .all().get(15, java.util.concurrent.TimeUnit.SECONDS);
-                            log.info("MSK topic 'otel-demo-orders' created");
+                            log.info("MSK topic 'otel-demo-orders-msk' created");
                         } else {
-                            log.info("MSK topic 'otel-demo-orders' already exists");
+                            log.info("MSK topic 'otel-demo-orders-msk' already exists");
                         }
                     }
                 } catch (Exception e) {
@@ -340,7 +340,7 @@ public class OrderController {
         // MSK Kafka
         if (kafkaProducer != null) {
             try {
-                kafkaProducer.send(new ProducerRecord<>("otel-demo-orders", orderId, orderJson)).get();
+                kafkaProducer.send(new ProducerRecord<>("otel-demo-orders-msk", orderId, orderJson)).get();
                 steps.add("msk: message sent");
             } catch (Exception e) {
                 steps.add("msk: " + e.getMessage());

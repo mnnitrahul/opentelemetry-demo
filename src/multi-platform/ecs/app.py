@@ -185,7 +185,7 @@ def process_order(simulate_slow=False):
     # MSK Kafka
     if kafka_producer:
         try:
-            kafka_producer.send('otel-demo-orders', value=order_data)
+            kafka_producer.send('otel-demo-orders-msk', value=order_data)
             kafka_producer.flush(timeout=5)
             steps.append("msk: message sent")
         except Exception as e:
