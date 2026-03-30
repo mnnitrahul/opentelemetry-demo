@@ -271,6 +271,11 @@ Resources:
                   - kinesis:PutRecord
                   - kinesis:PutRecords
                 Resource: '*'
+              - Sid: EcsOpenSearch
+                Effect: Allow
+                Action:
+                  - es:ESHttp*
+                Resource: '*'
 
   # --- ECS Execution Role ---
   EcsExecutionRole:
@@ -678,6 +683,73 @@ Resources:
       Tags:
         Project: otel-demo
 
+  # --- Amazon OpenSearch Service ---
+  OpenSearchSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for OpenSearch Service
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EcsTaskSG
+          Description: OpenSearch from ECS tasks
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EksClusterSG
+          Description: OpenSearch from EKS
+      Tags:
+        - Key: Name
+          Value: otel-demo-opensearch-sg
+
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: otel-demo-search
+      EngineVersion: OpenSearch_2.11
+      ClusterConfig:
+        InstanceType: t3.small.search
+        InstanceCount: 1
+        DedicatedMasterEnabled: false
+        ZoneAwarenessEnabled: false
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp3
+        VolumeSize: 10
+      VPCOptions:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+        SecurityGroupIds:
+          - !Ref OpenSearchSG
+      AccessPolicies:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: '*'
+            Action: 'es:*'
+            Resource: !Sub 'arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/otel-demo-search/*'
+      Tags:
+        - Key: Project
+          Value: otel-demo
+    Type: AWS::MSK::ServerlessCluster
+    Properties:
+      ClusterName: otel-demo-kafka
+      ClientAuthentication:
+        Sasl:
+          Iam:
+            Enabled: true
+      VpcConfigs:
+        - SubnetIds:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref MskSG
+      Tags:
+        Project: otel-demo
+
 # ---------------------------------------------------------------------------
 # Outputs / Exports
 # ---------------------------------------------------------------------------
@@ -896,3 +968,9 @@ Outputs:
     Value: !GetAtt OrderStream.Arn
     Export:
       Name: OtelDemoOrderStreamArn
+
+  OpenSearchEndpoint:
+    Description: Amazon OpenSearch Service domain endpoint
+    Value: !Sub https://${OpenSearchDomain.DomainEndpoint}
+    Export:
+      Name: OtelDemoOpenSearchEndpoint

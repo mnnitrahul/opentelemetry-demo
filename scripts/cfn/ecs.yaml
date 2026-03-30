@@ -509,6 +509,8 @@ Resources:
               Value: !Sub http://${Alb.DNSName}
             - Name: MSK_BOOTSTRAP
               Value: !Ref MskBootstrap
+            - Name: OPENSEARCH_ENDPOINT
+              Value: !ImportValue OtelDemoOpenSearchEndpoint
             - Name: SNS_TOPIC_ARN
               Value: !ImportValue OtelDemoOrderTopicArn
             - Name: SQS_QUEUE_URL

@@ -3,6 +3,7 @@ package com.otel.demo;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
+import org.apache.http.HttpHost;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -10,6 +11,13 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.opensearch.client.RestClient;
+import org.opensearch.client.opensearch.OpenSearchClient;
+import org.opensearch.client.opensearch.core.IndexRequest;
+import org.opensearch.client.opensearch.core.SearchRequest;
+import org.opensearch.client.opensearch.core.SearchResponse;
+import org.opensearch.client.json.jackson.JacksonJsonpMapper;
+import org.opensearch.client.transport.rest_client.RestClientTransport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -55,6 +63,7 @@ public class OrderController {
     private final String pgPassword = env("PG_PASSWORD", "otelpassword123");
     private final String pgDatabase = env("PG_DATABASE", "otel");
     private final String mskBootstrap = env("MSK_BOOTSTRAP", "");
+    private final String opensearchEndpoint = env("OPENSEARCH_ENDPOINT", "");
 
     private DynamoDbClient dynamodb;
     private S3Client s3;
@@ -64,6 +73,7 @@ public class OrderController {
     private WebClient webClient;
     private Connection pgConn;
     private KafkaProducer<String, String> kafkaProducer;
+    private OpenSearchClient opensearchClient;
 
     @PostConstruct
     public void init() {
@@ -138,6 +148,17 @@ public class OrderController {
                 log.info("MSK Kafka connected: {}", mskBootstrap);
             } catch (Exception e) {
                 log.warn("MSK Kafka setup failed: {}", e.getMessage());
+            }
+        }
+
+        // OpenSearch
+        if (!opensearchEndpoint.isEmpty()) {
+            try {
+                RestClient restClient = RestClient.builder(HttpHost.create(opensearchEndpoint)).build();
+                opensearchClient = new OpenSearchClient(new RestClientTransport(restClient, new JacksonJsonpMapper()));
+                log.info("OpenSearch connected: {}", opensearchEndpoint);
+            } catch (Exception e) {
+                log.warn("OpenSearch setup failed: {}", e.getMessage());
             }
         }
     }
@@ -271,6 +292,20 @@ public class OrderController {
                 steps.add("aurora: order inserted");
             } catch (Exception e) {
                 steps.add("aurora: " + e.getMessage());
+            }
+        }
+
+        // OpenSearch
+        if (opensearchClient != null) {
+            try {
+                Map<String, Object> doc = Map.of(
+                    "orderId", orderId, "status", "CREATED",
+                    "platform", "ecs-java", "timestamp", timestamp);
+                opensearchClient.index(IndexRequest.of(i -> i.index("otel-demo-orders").id(orderId).document(doc)));
+                opensearchClient.search(SearchRequest.of(s -> s.index("otel-demo-orders").size(1)), Map.class);
+                steps.add("opensearch: indexed + searched");
+            } catch (Exception e) {
+                steps.add("opensearch: " + e.getMessage());
             }
         }
 
