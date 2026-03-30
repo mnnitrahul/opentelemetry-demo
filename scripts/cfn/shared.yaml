@@ -684,6 +684,11 @@ Resources:
         Project: otel-demo
 
   # --- Amazon OpenSearch Service ---
+  OpenSearchServiceLinkedRole:
+    Type: AWS::IAM::ServiceLinkedRole
+    Properties:
+      AWSServiceName: es.amazonaws.com
+
   OpenSearchSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -706,6 +711,7 @@ Resources:
 
   OpenSearchDomain:
     Type: AWS::OpenSearchService::Domain
+    DependsOn: OpenSearchServiceLinkedRole
     Properties:
       DomainName: otel-demo-search
       EngineVersion: OpenSearch_2.11
@@ -734,21 +740,6 @@ Resources:
       Tags:
         - Key: Project
           Value: otel-demo
-    Type: AWS::MSK::ServerlessCluster
-    Properties:
-      ClusterName: otel-demo-kafka
-      ClientAuthentication:
-        Sasl:
-          Iam:
-            Enabled: true
-      VpcConfigs:
-        - SubnetIds:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-          SecurityGroups:
-            - !Ref MskSG
-      Tags:
-        Project: otel-demo
 
 # ---------------------------------------------------------------------------
 # Outputs / Exports
