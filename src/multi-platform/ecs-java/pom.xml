@@ -83,6 +83,13 @@
             <version>2.10.4</version>
         </dependency>
 
+        <!-- Redis (Jedis) -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>5.1.0</version>
+        </dependency>
+
         <!-- HTTP client for calling payment/inventory -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

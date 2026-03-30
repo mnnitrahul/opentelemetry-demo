@@ -583,6 +583,23 @@ Resources:
         - Key: Project
           Value: otel-demo
 
+  # --- ElastiCache Provisioned (Redis) ---
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupDescription: otel-demo provisioned Redis
+      ReplicationGroupId: otel-demo-redis
+      Engine: redis
+      CacheNodeType: cache.t3.micro
+      NumCacheClusters: 1
+      CacheSubnetGroupName: !Ref ValkeySubnetGroup
+      SecurityGroupIds:
+        - !Ref ValkeySG
+      TransitEncryptionEnabled: true
+      Tags:
+        - Key: Project
+          Value: otel-demo
+
   # --- Aurora Serverless v2 (PostgreSQL) ---
   AuroraSG:
     Type: AWS::EC2::SecurityGroup
@@ -904,6 +921,12 @@ Outputs:
     Value: !Sub ${ValkeyServerless.Endpoint.Address}:${ValkeyServerless.Endpoint.Port}
     Export:
       Name: OtelDemoValkeyEndpoint
+
+  RedisEndpoint:
+    Description: ElastiCache Provisioned Redis endpoint
+    Value: !Sub ${RedisReplicationGroup.PrimaryEndPoint.Address}:${RedisReplicationGroup.PrimaryEndPoint.Port}
+    Export:
+      Name: OtelDemoRedisEndpoint
 
   AuroraEndpoint:
     Description: Aurora Serverless PostgreSQL endpoint

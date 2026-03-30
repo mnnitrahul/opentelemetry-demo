@@ -18,6 +18,8 @@ import org.opensearch.client.opensearch.core.SearchRequest;
 import org.opensearch.client.opensearch.core.SearchResponse;
 import org.opensearch.client.json.jackson.JacksonJsonpMapper;
 import org.opensearch.client.transport.rest_client.RestClientTransport;
+import redis.clients.jedis.JedisPooled;
+import redis.clients.jedis.DefaultJedisClientConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -64,6 +66,7 @@ public class OrderController {
     private final String pgDatabase = env("PG_DATABASE", "otel");
     private final String mskBootstrap = env("MSK_BOOTSTRAP", "");
     private final String opensearchEndpoint = env("OPENSEARCH_ENDPOINT", "");
+    private final String redisAddr = env("REDIS_ADDR", "");
 
     private DynamoDbClient dynamodb;
     private S3Client s3;
@@ -74,6 +77,7 @@ public class OrderController {
     private Connection pgConn;
     private KafkaProducer<String, String> kafkaProducer;
     private OpenSearchClient opensearchClient;
+    private JedisPooled jedis;
 
     @PostConstruct
     public void init() {
@@ -159,6 +163,18 @@ public class OrderController {
                 log.info("OpenSearch connected: {}", opensearchEndpoint);
             } catch (Exception e) {
                 log.warn("OpenSearch setup failed: {}", e.getMessage());
+            }
+        }
+
+        // Redis (provisioned ElastiCache)
+        if (!redisAddr.isEmpty()) {
+            try {
+                String[] parts = redisAddr.split(":");
+                jedis = new JedisPooled(parts[0], Integer.parseInt(parts[1]),
+                    DefaultJedisClientConfig.builder().ssl(true).build());
+                log.info("Redis connected: {}", redisAddr);
+            } catch (Exception e) {
+                log.warn("Redis setup failed: {}", e.getMessage());
             }
         }
     }
@@ -292,6 +308,18 @@ public class OrderController {
                 steps.add("aurora: order inserted");
             } catch (Exception e) {
                 steps.add("aurora: " + e.getMessage());
+            }
+        }
+
+        // Redis (provisioned ElastiCache)
+        if (jedis != null) {
+            try {
+                String key = "order:" + orderId;
+                jedis.setex(key, 300, orderJson);
+                jedis.get(key);
+                steps.add("redis: cached + read");
+            } catch (Exception e) {
+                steps.add("redis: " + e.getMessage());
             }
         }
 
