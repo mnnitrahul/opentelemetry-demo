@@ -18,8 +18,6 @@ opentelemetry-collector:
         region: us-east-1
         service: monitoring
     exporters:
-      file/traces:
-        path: /tmp/otel-traces.json
       otlphttp/xray:
         endpoint: https://xray.us-east-1.amazonaws.com
         auth:
@@ -82,7 +80,7 @@ opentelemetry-collector:
       extensions: [health_check, sigv4auth, sigv4auth/xray-beta, sigv4auth/metrics, k8s_observer, k8s_leader_elector/k8s_cluster]
       pipelines:
         traces:
-          exporters: [otlp/jaeger, debug, spanmetrics, otlphttp/xray, otlphttp/xray-beta, file/traces]
+          exporters: [otlp/jaeger, debug, spanmetrics, otlphttp/xray, otlphttp/xray-beta]
         metrics:
           processors:
             - k8sattributes
