@@ -167,13 +167,15 @@ Resources:
                   authenticator: sigv4auth/metrics
               debug:
                 verbosity: detailed
+              file/traces:
+                path: /dev/stdout
             service:
               extensions: [sigv4auth, sigv4auth/xray-beta, sigv4auth/metrics]
               pipelines:
                 traces:
                   receivers: [otlp]
                   processors: [resourcedetection]
-                  exporters: [otlphttp/xray, otlphttp/xray-beta, debug]
+                  exporters: [otlphttp/xray, otlphttp/xray-beta, file/traces]
                 metrics:
                   receivers: [otlp]
                   processors: [resourcedetection, transform/zeus]

@@ -249,6 +249,8 @@ Resources:
                     compression: gzip
                     auth:
                       authenticator: sigv4auth/metrics
+                  file/traces:
+                    path: /dev/stdout
                   debug:
                     verbosity: detailed
                 service:
@@ -257,7 +259,7 @@ Resources:
                     traces:
                       receivers: [otlp]
                       processors: [resourcedetection]
-                      exporters: [otlphttp/xray, otlphttp/xray-beta, debug]
+                      exporters: [otlphttp/xray, otlphttp/xray-beta, file/traces]
                     metrics:
                       receivers: [otlp]
                       processors: [resourcedetection, transform/zeus]
@@ -397,6 +399,8 @@ Resources:
                     compression: gzip
                     auth:
                       authenticator: sigv4auth/metrics
+                  file/traces:
+                    path: /dev/stdout
                   debug:
                     verbosity: detailed
                 service:
@@ -405,7 +409,7 @@ Resources:
                     traces:
                       receivers: [otlp]
                       processors: [resourcedetection]
-                      exporters: [otlphttp/xray, otlphttp/xray-beta, debug]
+                      exporters: [otlphttp/xray, otlphttp/xray-beta, file/traces]
                     metrics:
                       receivers: [otlp]
                       processors: [resourcedetection, transform/zeus]
@@ -601,6 +605,8 @@ Resources:
                     compression: gzip
                     auth:
                       authenticator: sigv4auth/metrics
+                  file/traces:
+                    path: /dev/stdout
                   debug:
                     verbosity: detailed
                 service:
@@ -609,7 +615,7 @@ Resources:
                     traces:
                       receivers: [otlp]
                       processors: [resourcedetection]
-                      exporters: [otlphttp/xray, otlphttp/xray-beta, debug]
+                      exporters: [otlphttp/xray, otlphttp/xray-beta, file/traces]
                     metrics:
                       receivers: [otlp]
                       processors: [resourcedetection, transform/zeus]
@@ -792,6 +798,8 @@ Resources:
                     compression: gzip
                     auth:
                       authenticator: sigv4auth/metrics
+                  file/traces:
+                    path: /dev/stdout
                   debug:
                     verbosity: detailed
                 service:
@@ -800,7 +808,7 @@ Resources:
                     traces:
                       receivers: [otlp]
                       processors: [resourcedetection]
-                      exporters: [otlphttp/xray, otlphttp/xray-beta, debug]
+                      exporters: [otlphttp/xray, otlphttp/xray-beta, file/traces]
                     metrics:
                       receivers: [otlp]
                       processors: [resourcedetection, transform/zeus]
