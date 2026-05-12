@@ -6,6 +6,28 @@ receivers:
       grpc:
         endpoint: 0.0.0.0:4317
 
+processors:
+  resourcedetection:
+    detectors: [env, ecs, ec2]
+    timeout: 5s
+    override: false
+  transform/zeus:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - replace_all_patterns(attributes, "value", "^$", "unknown")
+      - context: resource
+        statements:
+          - replace_all_patterns(attributes, "value", "^$", "unknown")
+          - delete_key(attributes, "host.ip") where attributes["host.ip"] != nil
+          - delete_key(attributes, "host.mac") where attributes["host.mac"] != nil
+          - delete_key(attributes, "process.command_args") where attributes["process.command_args"] != nil
+          - delete_key(attributes, "aws.log.group.names") where attributes["aws.log.group.names"] != nil
+          - delete_key(attributes, "aws.log.stream.names") where attributes["aws.log.stream.names"] != nil
+          - delete_key(attributes, "aws.log.group.arns") where attributes["aws.log.group.arns"] != nil
+          - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
+
 extensions:
   sigv4auth:
     region: us-east-1
@@ -13,6 +35,9 @@ extensions:
   sigv4auth/xray-beta:
     region: us-west-2
     service: xray
+  sigv4auth/metrics:
+    region: us-east-1
+    service: monitoring
 
 exporters:
   otlphttp/xray:
@@ -23,12 +48,22 @@ exporters:
     endpoint: https://xray-beta.us-west-2.amazonaws.com
     auth:
       authenticator: sigv4auth/xray-beta
+  otlphttp/cloudwatch-metrics:
+    endpoint: https://granite.amazonaws.com
+    compression: gzip
+    auth:
+      authenticator: sigv4auth/metrics
   debug:
     verbosity: basic
 
 service:
-  extensions: [sigv4auth, sigv4auth/xray-beta]
+  extensions: [sigv4auth, sigv4auth/xray-beta, sigv4auth/metrics]
   pipelines:
     traces:
       receivers: [otlp]
+      processors: [resourcedetection]
       exporters: [otlphttp/xray, otlphttp/xray-beta, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [resourcedetection, transform/zeus]
+      exporters: [otlphttp/cloudwatch-metrics, debug]
