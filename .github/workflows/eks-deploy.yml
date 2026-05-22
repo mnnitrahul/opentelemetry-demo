@@ -26,10 +26,16 @@ on:
         description: "Number of worker nodes"
         required: true
         default: "3"
+      values_file:
+        description: "Helm values file (path within repo)"
+        required: true
+        default: "scripts/helm-values-xray.yaml"
 
 env:
   NAMESPACE: otel-demo
   XRAY_POLICY_NAME: otel-collector-xray-policy
+  # Role name is suffixed with the cluster name at use-site so multiple clusters
+  # in the same account don't collide. Final form: otel-collector-xray-role-<cluster_name>
   XRAY_ROLE_NAME: otel-collector-xray-role
   COLLECTOR_SA_NAME: otel-collector
   APP_TAG: Application=AppWithMidlina
@@ -84,41 +90,59 @@ jobs:
               --tags "${APP_TAG}"
           fi
 
-      - name: Create IAM policy for X-Ray
+      - name: Create IAM policy for X-Ray and CloudWatch Metrics V2
         id: iam
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${XRAY_POLICY_NAME}"
 
-          if ! aws iam get-policy --policy-arn "${POLICY_ARN}" &> /dev/null; then
+          # CloudWatch Metrics V2 (Zeus) reuses cloudwatch:PutMetricData.
+          # cloudwatch:PutOtelMetricData is required for FAS-token callers.
+          POLICY_DOC='{
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+                "cloudwatch:PutMetricData",
+                "cloudwatch:PutOtelMetricData"
+              ],
+              "Resource": "*"
+            }]
+          }'
+
+          if aws iam get-policy --policy-arn "${POLICY_ARN}" &> /dev/null; then
+            # Policy exists from prior runs (may be missing cloudwatch:* actions);
+            # publish a new default version so V2 ingestion works.
+            aws iam create-policy-version \
+              --policy-arn "${POLICY_ARN}" \
+              --policy-document "${POLICY_DOC}" \
+              --set-as-default || true
+          else
             POLICY_ARN=$(aws iam create-policy \
               --policy-name "${XRAY_POLICY_NAME}" \
-              --policy-document '{
-                "Version": "2012-10-17",
-                "Statement": [{
-                  "Effect": "Allow",
-                  "Action": [
-                    "xray:PutTraceSegments",
-                    "xray:PutTelemetryRecords",
-                    "xray:GetSamplingRules",
-                    "xray:GetSamplingTargets"
-                  ],
-                  "Resource": "*"
-                }]
-              }' \
+              --policy-document "${POLICY_DOC}" \
               --query 'Policy.Arn' --output text)
           fi
           echo "policy_arn=${POLICY_ARN}" >> "$GITHUB_OUTPUT"
 
       - name: Create IRSA for OTel Collector
+        env:
+          CLUSTER_NAME: ${{ inputs.cluster_name }}
+          REGION: ${{ inputs.region }}
+          POLICY_ARN: ${{ steps.iam.outputs.policy_arn }}
         run: |
+          ROLE_NAME="${XRAY_ROLE_NAME}-${CLUSTER_NAME}"
           eksctl create iamserviceaccount \
             --name "${COLLECTOR_SA_NAME}" \
             --namespace "${NAMESPACE}" \
-            --cluster "${{ inputs.cluster_name }}" \
-            --region "${{ inputs.region }}" \
-            --attach-policy-arn "${{ steps.iam.outputs.policy_arn }}" \
-            --role-name "${XRAY_ROLE_NAME}" \
+            --cluster "${CLUSTER_NAME}" \
+            --region "${REGION}" \
+            --attach-policy-arn "${POLICY_ARN}" \
+            --role-name "${ROLE_NAME}" \
             --approve \
             --override-existing-serviceaccounts
 
@@ -135,17 +159,27 @@ jobs:
             --overwrite
 
       - name: Deploy OpenTelemetry Demo
+        env:
+          REGION: ${{ inputs.region }}
+          VALUES_FILE: ${{ inputs.values_file }}
         run: |
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
           helm repo update
 
-          # Update region in values file
-          sed -i "s/us-east-1/${{ inputs.region }}/g" scripts/helm-values-xray.yaml
+          # Reject path traversal / absolute paths so an attacker can't point this
+          # at an arbitrary file outside the repo (defense-in-depth; workflow_dispatch
+          # already requires write access).
+          case "${VALUES_FILE}" in
+            /*|*..*) echo "Invalid values_file: ${VALUES_FILE}"; exit 1 ;;
+          esac
+
+          # Update region placeholder in the chosen values file
+          sed -i "s/us-east-1/${REGION}/g" "${VALUES_FILE}"
 
           helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
             --namespace "${NAMESPACE}" \
             --create-namespace \
-            -f scripts/helm-values-xray.yaml \
+            -f "${VALUES_FILE}" \
             --wait \
             --timeout 10m
 
