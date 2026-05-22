@@ -103,7 +103,10 @@ opentelemetry-collector:
               - delete_key(attributes, "aws.log.stream.arns") where attributes["aws.log.stream.arns"] != nil
 
     # spanmetrics connector removed — RED metrics now come from SDK directly.
-    connectors: {}
+    # Helm merges maps, so we must explicitly null out the chart default
+    # `connectors.spanmetrics: {}` rather than relying on `connectors: {}`.
+    connectors:
+      spanmetrics: null
 
     service:
       extensions:
@@ -121,6 +124,13 @@ opentelemetry-collector:
             - otlphttp/xray
             - otlphttp/xray-beta
         metrics:
+          # Override receivers to drop `spanmetrics` (chart default includes it).
+          receivers:
+            - otlp
+            - receiver_creator/metrics
+            - hostmetrics
+            - kubeletstats
+            - k8s_cluster
           processors:
             - k8sattributes
             - memory_limiter
