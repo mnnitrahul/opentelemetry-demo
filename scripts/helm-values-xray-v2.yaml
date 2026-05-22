@@ -1,3 +1,6 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
 # =============================================================================
 # Helm Values: AWS EKS + X-Ray + CloudWatch Metrics V2 (Zeus) — SDK metrics path
 # =============================================================================
